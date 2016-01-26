@@ -99,9 +99,10 @@
 
 
 static const flashdev_info_t gen_FlashTable_p[] = {
-	{{0x2C, 0xDC, 0x90, 0xA6, 0x54, 0x00}, 5, 5, IO_8BIT, 512, 256, 4096, 128, 0x31C08222, 0xC03222, 0x101, 80, VEND_MICRON, 1024, "MT29F4G08ABAEA", 0,
+	{{0x2C, 0xDC, 0x90, 0xA6, 0x54, 0x00}, 5, 5, IO_8BIT, 512, 256, 4096, 128,
+	 0x31C08222, 0xC03222, 0x101, 80, VEND_MICRON, 1024, "MT29F4G08ABAEA", 0,
 	 {MICRON_8K, {0xEF, 0xEE, 0xFF, 7, 0x89, 0, 1, RTYPE_MICRON, {0x1, 0x14}, {0x1, 0x5} },
-		{RAND_TYPE_SAMSUNG, {0x2D2D, 1, 1, 1, 1, 1} } } },
+	 {RAND_TYPE_SAMSUNG, {0x2D2D, 1, 1, 1, 1, 1} } } },
 };
 
 static unsigned int flash_number = sizeof(gen_FlashTable_p) / sizeof(flashdev_info_t);
