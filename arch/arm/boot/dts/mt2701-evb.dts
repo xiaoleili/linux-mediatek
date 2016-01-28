@@ -61,11 +61,6 @@
 	};
 };
 
-&nfi {
+&nand {
 	status = "okay";
 };
-
-&nfiecc {
-	status = "okay";
-};
-

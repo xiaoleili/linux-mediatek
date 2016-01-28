@@ -1,0 +1,42 @@
+MTK Smart Device SoCs NAND controller DT binding
+
+Required properties:
+- compatible:          Should be "mediatek,mtxxxx-nand".
+- reg:                 The first contains base physical address and size of
+                       NAND controller's registers. The second contains base
+                       physical address and size of NAND ECC engine.
+- interrupts:          Interrupt number for nfc.
+- clocks:              NAND controller clocks.
+- clock-names:         NAND controller clocks internal name.
+- vmch-supply:         NAND power supply.
+- status:              Be disabled default. Then set "okay" by project.
+- #address-cells:      Partition address, should be set 1.
+- #size-cells:         Partition size, should be set 1.
+
+Optional properties:
+
+Optional subnodes:
+- Partitions, see Documentation/devicetree/bindings/mtd/partition.txt
+
+Example:
+
+	nand: nand@1100d000 {
+		compatible = "mediatek,mtxxxx-nfc";
+		reg = <0 0x1100d000 0 0x1000>, <0 0x1100e000 0 0x1000>;
+		interrupts = <GIC_SPI 96 IRQ_TYPE_LEVEL_LOW>;
+		clocks = <&pericfg CLK_PERI_NFI>, <&pericfg CLK_PERI_NFI_ECC>,
+				 <&pericfg CLK_PERI_NFI_PAD>;
+		clock-names = "nfi_ck", "nfi_ecc_ck", "nfi_pad_ck";
+		vmch-supply = <&mt6323_vmch_reg>;
+		status = "disabled";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		preloader@0 {
+			label = "pl";
+			reg = <0x00000000 0x00400000>;
+		};
+
+		...
+
+	};
