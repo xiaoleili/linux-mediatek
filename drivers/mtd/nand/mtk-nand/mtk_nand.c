@@ -64,13 +64,13 @@
 #endif
 
 #define READ_REGISTER_UINT8(reg) \
-	(*(unsigned char * const)(reg))
+	(*(volatile unsigned char * const)(reg))
 
 #define READ_REGISTER_UINT16(reg) \
-	(*(unsigned short * const)(reg))
+	(*(volatile unsigned short * const)(reg))
 
 #define READ_REGISTER_UINT32(reg) \
-	(*(unsigned int * const)(reg))
+	(*(volatile unsigned int * const)(reg))
 
 
 #define INREG8(x)			READ_REGISTER_UINT8((unsigned char *)((void *)(x)))
@@ -82,11 +82,11 @@
 #define DRV_Reg(addr)				DRV_Reg16(addr)
 
 #define WRITE_REGISTER_UINT8(reg, val) \
-	((*(unsigned char * const)(reg)) = (val))
+	((*(volatile unsigned char * const)(reg)) = (val))
 #define WRITE_REGISTER_UINT16(reg, val) \
-	((*(unsigned short * const)(reg)) = (val))
+	((*(volatile unsigned short * const)(reg)) = (val))
 #define WRITE_REGISTER_UINT32(reg, val) \
-	((*(unsigned int * const)(reg)) = (val))
+	((*(volatile unsigned int * const)(reg)) = (val))
 
 
 #define OUTREG8(x, y)		WRITE_REGISTER_UINT8((unsigned char *)((void *)(x)), (unsigned char)(y))
