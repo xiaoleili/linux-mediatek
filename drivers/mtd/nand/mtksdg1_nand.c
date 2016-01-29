@@ -67,14 +67,15 @@ static void mtk_nfc_set_address(struct mtk_nfc_host *host, u32 column, u32 row,
 static void mtk_nfc_hw_config(struct mtd_info *mtd)
 {
 	struct nand_chip *chip = mtd->priv;
+	struct mtk_nfc_host *host = chip->priv;
 	u32 spare_per_sector;
 	u32 ecc_bit;
 	u32 spare_bit;
 
-	chip->sectorsize_shift = (mtd->writesize > 512) ? 10 : 9;
-	chip->fdm_size = 8;
+	host->sectorsize_shift = (mtd->writesize > 512) ? 10 : 9;
+	host->fdm_size = 8;
 
-	spare_per_sector = mtd->oobsize / (mtd->writesize >> chip->sectorsize_shift);
+	spare_per_sector = mtd->oobsize / (mtd->writesize >> host->sectorsize_shift);
 
 	switch (spare_per_sector) {
 	case 16:
@@ -327,6 +328,8 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 		dev_err(dev, "mtd parse partition error\n");
 		goto nand_free;
 	}
+
+	return 0;
 
 nand_free:
 	nand_release(mtd);
