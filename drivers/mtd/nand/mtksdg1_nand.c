@@ -43,7 +43,8 @@ struct mtk_nfc_host {
 	void __iomem *nfiecc_base;
 	struct mtk_nfc_clk clk;
 	struct completion complete;
-	bool fmt_initialized;
+	u32 sectorsize_shift;
+	u32 fdm_size;
 };
 
 static void mtk_nfc_set_command(struct mtk_nfc_host *host, u8 command)
@@ -63,13 +64,32 @@ static void mtk_nfc_set_address(struct mtk_nfc_host *host, u32 column, u32 row,
 		;
 }
 
+static void mtk_nfc_hw_config(struct mtd_info *mtd)
+{
+	struct nand_chip *chip = mtd->priv;
+	u32 spare_per_sector;
+	u32 ecc_bit;
+	u32 spare_bit;
+
+	chip->sectorsize_shift = (mtd->writesize > 512) ? 10 : 9;
+	chip->fdm_size = 8;
+
+	spare_per_sector = mtd->oobsize / (mtd->writesize >> chip->sectorsize_shift);
+
+	switch (spare_per_sector) {
+	case 16:
+		spare_bit = PAGEFMT_SPARE_16;
+		ecc_bit = 4;
+		break;
+	}
+}
+
 static void mtk_nfc_hw_reset(struct mtk_nfc_host *host)
 {
 	writel(CON_FIFO_FLUSH | CON_NFI_RST, host->nfi_base + MTKSDG1_NFC_CON);
 	while ((readl(host->nfi_base + MTKSDG1_NFC_MASTER_STA) & 0x0fff) != 0)
 		;
 	writel(CON_FIFO_FLUSH | CON_NFI_RST, host->nfi_base + MTKSDG1_NFC_CON);
-	mtk_nfc_set_command(host, NAND_CMD_RESET);
 };
 
 static void mtk_nfc_device_reset(struct mtk_nfc_host *host)
@@ -79,6 +99,7 @@ static void mtk_nfc_device_reset(struct mtk_nfc_host *host)
 	mtk_nfc_hw_reset(host);
 	writew(INTR_RST_DONE_EN, host->nfi_base + MTKSDG1_NFC_INTR_EN);
 	writew(CNFG_OP_RESET, host->nfi_base + MTKSDG1_NFC_CNFG);
+	mtk_nfc_set_command(host, NAND_CMD_RESET);
 	writew(0xf1, host->nfi_base + MTKSDG1_NFC_CNRNB);
 	init_completion(&host->complete);
 	ret = wait_for_completion_timeout(&host->complete, MTK_DEFAULT_TIMEOUT);
@@ -93,8 +114,6 @@ static irqreturn_t mtk_irq_handle(int irq, void *devid)
 
 	sta = readw(host->nfi_base + MTKSDG1_NFC_INTR_STA);
 	ien = readw(host->nfi_base + MTKSDG1_NFC_INTR_EN);
-
-	pr_err("[xl] sta 0x%x ien 0x%x\n",sta ,ien);
 
 	if (!(sta & ien))
 		return IRQ_NONE;
@@ -148,7 +167,7 @@ static void mtk_nfc_select_chip(struct mtd_info *mtd, int chip)
 	struct nand_chip *nand = mtd->priv;
 	struct mtk_nfc_host *host = nand->priv;
 
-	if ((chip > 0) && (chip < MTK_NAND_MAX_CHIP))
+	if ((chip >= 0) && (chip < MTK_NAND_MAX_CHIP))
 		writel(chip, host->nfi_base + MTKSDG1_NFC_CSEL);
 }
 
@@ -170,6 +189,8 @@ static void mtk_nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 		mtk_nfc_set_address(host, column, 0, 1, 0);
 		while ((readl(host->nfi_base + MTKSDG1_NFC_STA) & STA_DATAR) != 0)
 			;
+		writel(CON_SRD, host->nfi_base + MTKSDG1_NFC_CON);
+		break;
 	default:
 		break;
 	}
@@ -180,8 +201,11 @@ static uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 	struct nand_chip *chip = mtd->priv;
 	struct mtk_nfc_host *host = chip->priv;
 
-	while (readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY) == 0)
-		;
+	while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY) & 0x1) == 0)
+	{
+		pr_err("cfg 0x%x con 0x%x pio 0x%x\n", readl(host->nfi_base + MTKSDG1_NFC_CNFG),
+			readl(host->nfi_base + MTKSDG1_NFC_CON), readl(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY));
+	}
 	return readb(host->nfi_base + MTKSDG1_NFC_DATAR);
 }
 
@@ -285,7 +309,13 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 
 	mtk_nfc_hw_init(host);
 
-	ret = nand_scan(mtd, max_chip);
+	ret = nand_scan_ident(mtd, max_chip, NULL);
+	if (ret) {
+		ret = -ENODEV;
+		goto clk_disable;
+	}
+
+	ret = nand_scan_tail(mtd);
 	if (ret) {
 		ret = -ENODEV;
 		goto clk_disable;

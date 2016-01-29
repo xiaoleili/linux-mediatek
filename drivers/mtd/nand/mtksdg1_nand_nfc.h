@@ -32,9 +32,29 @@
 #define		CNFG_OP_RESET (5 << 12)
 #define		CNFG_OP_CUST (6 << 12)
 #define MTKSDG1_NFC_PAGEFMT 0x04
+#define		PAGEFMT_SPARE_16 0
+#define		PAGEFMT_SPARE_26 1
+#define		PAGEFMT_SPARE_27 2
+#define		PAGEFMT_SPARE_28 3
+#define		PAGEFMT_SPARE_32 4
+#define		PAGEFMT_SPARE_36 5
+#define		PAGEFMT_SPARE_40 6
+#define		PAGEFMT_SPARE_44 7
+#define		PAGEFMT_SPARE_48 8
+#define		PAGEFMT_SPARE_49 9
+#define		PAGEFMT_SPARE_50 0xa
+#define		PAGEFMT_SPARE_51 0xb
+#define		PAGEFMT_SPARE_52 0xc
+#define		PAGEFMT_SPARE_62 0xd
+#define		PAGEFMT_SPARE_63 0xe
+#define		PAGEFMT_SPARE_64 0xf
 #define MTKSDG1_NFC_CON 0x08
 #define		CON_FIFO_FLUSH BIT(0)
 #define		CON_NFI_RST BIT(1)
+#define		CON_SRD BIT(4)
+#define		CON_BRD BIT(8)
+#define		CON_BWR BIT(9)
+#define		CON_SEC_SHIFT 12
 #define MTKSDG1_NFC_ACCCON 0x0C
 #define MTKSDG1_NFC_INTR_EN 0x10
 #define		INTR_RD_DONE_EN BIT(0)
