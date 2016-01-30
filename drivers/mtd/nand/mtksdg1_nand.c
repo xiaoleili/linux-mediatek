@@ -28,6 +28,7 @@
 
 #define MTK_NAND_MAX_CHIP 2
 #define MTK_DEFAULT_TIMEOUT (1 * HZ)
+#define MTK_ECC_PARITY_BIT 14
 
 struct mtk_nfc_clk {
 	struct clk *nfi_clk;
@@ -59,7 +60,8 @@ static void mtk_nfc_set_address(struct mtk_nfc_host *host, u32 column, u32 row,
 {
 	writel(column, host->nfi_base + MTKSDG1_NFC_COLADDR);
 	writel(row, host->nfi_base + MTKSDG1_NFC_ROWADDR);
-	writel(colnob | (rownob << ADDR_ROW_NOB_SHIFT), host->nfi_base + MTKSDG1_NFC_ADDRNOB);
+	writel(colnob | (rownob << ADDR_ROW_NOB_SHIFT),
+		host->nfi_base + MTKSDG1_NFC_ADDRNOB);
 	while ((readl(host->nfi_base + MTKSDG1_NFC_STA) & STA_ADDR) != 0)
 		;
 }
@@ -68,21 +70,66 @@ static void mtk_nfc_hw_config(struct mtd_info *mtd)
 {
 	struct nand_chip *chip = mtd->priv;
 	struct mtk_nfc_host *host = chip->priv;
-	u32 spare_per_sector;
-	u32 ecc_bit;
-	u32 spare_bit;
+	u32 spare_per_sector, ecc_bit, spare_bit, pagesize_bit, reg_val;
+	u32 dec_size, enc_size, ecc_level;
 
 	host->sectorsize_shift = (mtd->writesize > 512) ? 10 : 9;
 	host->fdm_size = 8;
 
-	spare_per_sector = mtd->oobsize / (mtd->writesize >> host->sectorsize_shift);
+	spare_per_sector =
+		mtd->oobsize / (mtd->writesize >> host->sectorsize_shift);
 
 	switch (spare_per_sector) {
 	case 16:
 		spare_bit = PAGEFMT_SPARE_16;
-		ecc_bit = 4;
+		ecc_bit = ECC_CNFG_4BIT;
+		ecc_level = 4;
+		break;
+	case 32:
+		if (host->sectorsize_shift == 10)
+			spare_bit = PAGEFMT_SPARE_16;
+		else
+			spare_bit = PAGEFMT_SPARE_32;
+		ecc_bit = ECC_CNFG_12BIT;
+		ecc_level = 12;
+		break;
+	default:
+		devm_err(host->dev,
+			"spare size %d is invalid\n", spare_per_sector);
 		break;
 	}
+
+	switch (mtd->writesize) {
+	case 512:
+	case 2048:
+		pagesize_bit = PAGEFMT_512_2K;
+		break;
+	case 4096:
+		pagesize_bit = PAGEFMT_2K_4K;
+		break;
+	case 8192:
+		pagesize_bit = PAGEFMT_4K_8K;
+		break;
+	default:
+		devm_err(host->dev,
+			"page size %d is invalid\n", mtd->writesize);
+		break;
+	}
+
+	reg_val = spare_bit << PAGEFMT_SPARE_SHIFT | pagesize_bit;
+	reg_val |= host->fdm_size << PAGEFMT_FDM_SHIFT;
+	reg_val |= host->fdm_size << PAGEFMT_FDM_ECC_SHIFT;
+	if (host->sectorsize_shift == 10)
+		reg_val |= PAGEFMT_FDM_SEC_SEL_512;
+	writew(reg_val, host->nfi_base + MTKSDG1_NFC_PAGEFMT);
+
+	enc_size = ((1 << host->sectorsize_shift) + host->fdm_size) << 3;
+	dec_size = enc_size + ecc_level * MTK_ECC_PARITY_BIT;
+	reg_val = ecc_bit | ECC_NFI_MODE | (enc_size << ECC_MS_SHIFT);
+	writel(reg_val, host->nfi_base + MTKSDG1_ECC_ENCNFG);
+	reg_val = ecc_bit | ECC_NFI_MODE | (dec_size << ECC_MS_SHIFT);
+	reg_val |= (DEC_CNFG_CORRECT | DEC_EMPTY_EN);
+	writel(reg_val, host->nfi_base + MTKSDG1_ECC_DECCNFG);
 }
 
 static void mtk_nfc_hw_reset(struct mtk_nfc_host *host)
@@ -188,11 +235,17 @@ static void mtk_nfc_cmdfunc(struct mtd_info *mtd, unsigned command, int column,
 			host->nfi_base + MTKSDG1_NFC_CNFG);
 		mtk_nfc_set_command(host, NAND_CMD_READID);
 		mtk_nfc_set_address(host, column, 0, 1, 0);
-		while ((readl(host->nfi_base + MTKSDG1_NFC_STA) & STA_DATAR) != 0)
-			;
+		writel(CON_SRD, host->nfi_base + MTKSDG1_NFC_CON);
+		break;
+	case NAND_CMD_STATUS:
+		mtk_nfc_hw_reset(host);
+		writew(CNFG_READ_EN | CNFG_BYTE_RW | CNFG_OP_SRD,
+			host->nfi_base + MTKSDG1_NFC_CNFG);
+		mtk_nfc_set_command(host, NAND_CMD_STATUS);
 		writel(CON_SRD, host->nfi_base + MTKSDG1_NFC_CON);
 		break;
 	default:
+		devm_err(host->dev, "command 0x%x is invalid\n", command);
 		break;
 	}
 }
@@ -203,10 +256,7 @@ static uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 	struct mtk_nfc_host *host = chip->priv;
 
 	while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY) & 0x1) == 0)
-	{
-		pr_err("cfg 0x%x con 0x%x pio 0x%x\n", readl(host->nfi_base + MTKSDG1_NFC_CNFG),
-			readl(host->nfi_base + MTKSDG1_NFC_CON), readl(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY));
-	}
+		;
 	return readb(host->nfi_base + MTKSDG1_NFC_DATAR);
 }
 
@@ -315,6 +365,8 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 		ret = -ENODEV;
 		goto clk_disable;
 	}
+
+	mtk_nfc_hw_config(mtd);
 
 	ret = nand_scan_tail(mtd);
 	if (ret) {
