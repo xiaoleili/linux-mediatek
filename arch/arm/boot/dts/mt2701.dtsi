@@ -75,6 +75,12 @@
 			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
 	};
 
+	topckgen: syscon@10000000 {
+		compatible = "mediatek,mt2701-topckgen", "syscon";
+		reg = <0 0x10000000 0 0x1000>;
+		#clock-cells = <1>;
+	};
+
 	pericfg: syscon@10003000 {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -82,6 +88,24 @@
 		reg = <0 0x10003000 0 0x1000>;
 		#clock-cells = <1>;
 		#reset-cells = <1>;
+	};
+
+	bring-up {
+		compatible = "mediatek,clk-bring-up", "mediatek,mt8173-bring-up";
+		clocks =
+			<&pericfg CLK_PERI_UART0>,
+			<&pericfg CLK_PERI_UART1>,
+			<&pericfg CLK_PERI_UART2>,
+			<&pericfg CLK_PERI_UART3>,
+			<&pericfg CLK_PERI_UART0_SEL>,
+			<&pericfg CLK_PERI_UART1_SEL>,
+			<&pericfg CLK_PERI_UART2_SEL>,
+			<&pericfg CLK_PERI_UART3_SEL>,
+			<&system_clk>,
+			<&system_clk>;
+
+		clock-names =
+			"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10";
 	};
 
 	pio: pinctrl@10005000 {
@@ -125,6 +149,13 @@
 		interrupt-parent = <&gic>;
 		reg = <0 0x10200100 0 0x1c>;
 	};
+
+        apmixedsys: syscon@10209000 {
+                compatible = "mediatek,mt2701-apmixedsys", "syscon";
+                reg = <0 0x10209000 0 0x1000>;
+                mediatek,hdmi-ibias = <0xa>;
+                #clock-cells = <1>;
+        };
 
 	gic: interrupt-controller@10211000 {
 		compatible = "arm,cortex-a7-gic";
