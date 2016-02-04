@@ -81,7 +81,7 @@ static void mtk_nfc_set_address(struct mtk_nfc_host *host, u32 column, u32 row,
 
 static struct nand_ecclayout nand_4k_128 = {
 	.oobavail = 32,
-	.oobfree = { {0, 8}, {32, 8}, {64, 8}, {96, 8} },
+	.oobfree = { {0, 32} },
 };
 
 static void mtk_nfc_hw_config(struct mtd_info *mtd)
@@ -336,13 +336,12 @@ static void mtk_nfc_write_fdm(struct nand_chip *chip, u32 sectors,
 				int oob_required)
 {
 	struct mtk_nfc_host *host = chip->priv;
-	struct nand_oobfree *free = chip->ecc.layout->oobfree;
 	u32 fdm[2], i;
 
 	for (i = 0; i < sectors; i++) {
 		memset(fdm, 0xff, 8);
 		if (oob_required)
-			memcpy(fdm, chip->oob_poi + free[i].offset,
+			memcpy(fdm, chip->oob_poi + i * host->fdm_size,
 				host->fdm_size);
 		writel(fdm[0], host->nfi_base + MTKSDG1_NFC_FDM0L + (i << 3));
 		writel(fdm[1], host->nfi_base + MTKSDG1_NFC_FDM0M + (i << 3));
@@ -412,28 +411,37 @@ static int mtk_nfc_write_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 {
 	struct mtk_nfc_host *host = chip->priv;
 	u32 sectors = mtd->writesize >> host->sectorsize_shift;
-	u32 *buf32 = (u32 *)buf;
-	u32 *oob32 = (u32 *)chip->oob_poi;
-	u32 i, j, spare_per_sector;
+	u8 *oob = chip->oob_poi;
+	u32 i, j, spare_per_sector, reg_val;
 
 	spare_per_sector =
 		mtd->oobsize / (mtd->writesize >> host->sectorsize_shift);
+
+	reg_val = readw(host->nfi_base + MTKSDG1_NFC_CNFG);
+	reg_val |= CNFG_BYTE_RW;
+	writew(reg_val, host->nfi_base + MTKSDG1_NFC_CNFG);
 
 	writel((sectors << CON_SEC_SHIFT) | CON_BWR,
 		host->nfi_base + MTKSDG1_NFC_CON);
 
 	for (i = 0; i < sectors; i++) {
-		for (j = 0; j < (1 << (host->sectorsize_shift - 2)); j++) {
+		for (j = 0; j < (1 << host->sectorsize_shift); j++) {
 			while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY)
-					& 0x1) == 0)
+				& 0x1) == 0)
 				;
-			writel(*buf32++, host->nfi_base + MTKSDG1_NFC_DATAW);
+			writel(*buf++, host->nfi_base + MTKSDG1_NFC_DATAW);
 		}
-		for (j = 0; j < (spare_per_sector >> 2); j++) {
+		for (j = 0; j < host->fdm_size; j++) {
 			while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY)
-					& 0x1) == 0)
+				& 0x1) == 0)
 				;
-			writel(*oob32++, host->nfi_base + MTKSDG1_NFC_DATAW);
+			writel(*oob++, host->nfi_base + MTKSDG1_NFC_DATAW);
+		}
+		for (j = 0; j < (spare_per_sector - host->fdm_size); j++) {
+			while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY)
+				& 0x1) == 0)
+				;
+			writel(0xff, host->nfi_base + MTKSDG1_NFC_DATAW);
 		}
 	}
 	while (((readl(host->nfi_base + MTKSDG1_NFC_ADDRCNTR) >> CNTR_SHIFT)
@@ -477,13 +485,12 @@ static int mtk_nfc_write_oob_raw(struct mtd_info *mtd, struct nand_chip *chip,
 static void mtk_nfc_read_fdm(struct nand_chip *chip, u32 sectors)
 {
 	struct mtk_nfc_host *host = chip->priv;
-	struct nand_oobfree *free = chip->ecc.layout->oobfree;
 	u32 fdm[2], i;
 
 	for (i = 0; i < sectors; i++) {
 		fdm[0] = readl(host->nfi_base + MTKSDG1_NFC_FDM0L + (i << 3));
 		fdm[1] = readl(host->nfi_base + MTKSDG1_NFC_FDM0M + (i << 3));
-		memcpy(chip->oob_poi + free[i].offset, fdm, host->fdm_size);
+		memcpy(chip->oob_poi + i * host->fdm_size, fdm, host->fdm_size);
 	}
 }
 
@@ -597,13 +604,16 @@ static int mtk_nfc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 {
 	struct mtk_nfc_host *host = chip->priv;
 	u32 sectors = mtd->writesize >> host->sectorsize_shift;
-	u32 *buf32 = (u32 *)buf;
-	u32 *oob32 = (u32 *)chip->oob_poi;
-	u32 i, j, spare_per_sector;
+	u8 *oob = chip->oob_poi;
+	u32 i, j, spare_per_sector, reg_val;
 	int ret;
 
 	spare_per_sector =
 		mtd->oobsize / (mtd->writesize >> host->sectorsize_shift);
+
+	reg_val = readw(host->nfi_base + MTKSDG1_NFC_CNFG);
+	reg_val |= CNFG_BYTE_RW;
+	writew(reg_val, host->nfi_base + MTKSDG1_NFC_CNFG);
 
 	writew(INTR_BUSY_RT_EN, host->nfi_base + MTKSDG1_NFC_INTR_EN);
 	init_completion(&host->complete);
@@ -617,17 +627,23 @@ static int mtk_nfc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 	writel((sectors << CON_SEC_SHIFT) | CON_BRD,
 		host->nfi_base + MTKSDG1_NFC_CON);
 	for (i = 0; i < sectors; i++) {
-		for (j = 0; j < (1 << (host->sectorsize_shift - 2)); j++) {
+		for (j = 0; j < (1 << host->sectorsize_shift); j++) {
 			while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY)
 				& 0x1) == 0)
 				;
-			*buf32++ = readl(host->nfi_base + MTKSDG1_NFC_DATAR);
+			*buf++ = readl(host->nfi_base + MTKSDG1_NFC_DATAR);
 		}
-		for (j = 0; j < (spare_per_sector >> 2); j++) {
+		for (j = 0; j < host->fdm_size; j++) {
 			while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY)
 				& 0x1) == 0)
 				;
-			*oob32++ = readl(host->nfi_base + MTKSDG1_NFC_DATAR);
+			*oob++ = readl(host->nfi_base + MTKSDG1_NFC_DATAR);
+		}
+		for (j = 0; j < (spare_per_sector - host->fdm_size); j++) {
+			while ((readb(host->nfi_base + MTKSDG1_NFC_PIO_DIRDY)
+				& 0x1) == 0)
+				;
+			readl(host->nfi_base + MTKSDG1_NFC_DATAR);
 		}
 	}
 
