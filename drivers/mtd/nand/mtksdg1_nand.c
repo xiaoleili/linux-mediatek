@@ -870,14 +870,20 @@ static int mtk_nfc_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 				int page)
 {
 	struct mtk_nfc_host *host = chip->priv;
+	struct mtd_ecc_stats stats;
 	u8 *buf = chip->buffers->databuf;
+	int ret = 0;
 
+	stats = mtd->ecc_stats;
 	memset(buf, 0xff, mtd->writesize);
 	chip->cmdfunc(mtd, NAND_CMD_READ0, 0, page);
 	mtk_nfc_read_page_hwecc(mtd, chip, buf, 1, page);
 	if (host->exchange_oob)
 		mtk_nfc_exchange_oob(mtd, chip, buf);
-	return 0;
+	if (ret < mtd->bitflip_threshold)
+		mtd->ecc_stats.corrected = stats.corrected;
+
+	return ret;
 }
 
 static int mtk_nfc_read_oob_raw(struct mtd_info *mtd, struct nand_chip *chip,
