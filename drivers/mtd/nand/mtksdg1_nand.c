@@ -292,9 +292,9 @@ static irqreturn_t mtk_ecc_irq_handle(int irq, void *devid)
 			writew(0, host->nfiecc_base + MTKSDG1_ECC_DECIRQ_EN);
 			ret = IRQ_HANDLED;
 		}
-	} else if (readw(host->nfiecc_base + MTKSDG1_ECC_ENCIRQ_STA) & 0x1) {
+	} else if (readl(host->nfiecc_base + MTKSDG1_ECC_ENCIRQ_STA) & 0x1) {
 		complete(&host->ecc_complete);
-		writew(0, host->nfiecc_base + MTKSDG1_ECC_ENCIRQ_EN);
+		writel(0, host->nfiecc_base + MTKSDG1_ECC_ENCIRQ_EN);
 		ret = IRQ_HANDLED;
 	}
 	return ret;
@@ -509,6 +509,7 @@ static int mtk_nfc_write_page(struct mtd_info *mtd,
 						MTK_DEFAULT_TIMEOUT);
 	if (!ret) {
 		dev_err(host->dev, "program ahb done timeout!\n");
+		writew(0, host->nfi_base + MTKSDG1_NFC_INTR_EN);
 		ret = -ETIMEDOUT;
 		goto timeout;
 	} else {
@@ -575,6 +576,8 @@ static int mtk_nfc_sector_encode(struct nand_chip *chip, u8 *data, u8 *parity)
 	reg_val |= ECC_DMA_MODE;
 	writel(reg_val, host->nfiecc_base + MTKSDG1_ECC_ENCCNFG);
 
+	writel(ENC_IRQEN, host->nfiecc_base + MTKSDG1_ECC_ENCIRQ_EN);
+	init_completion(&host->ecc_complete);
 	dma_addr = dma_map_single(host->dev, data,
 			(1 << host->sectorsize_shift) + host->fdm_size,
 					DMA_TO_DEVICE);
@@ -582,6 +585,16 @@ static int mtk_nfc_sector_encode(struct nand_chip *chip, u8 *data, u8 *parity)
 	writel(lower_32_bits(dma_addr),
 		host->nfiecc_base + MTKSDG1_ECC_ENCDIADDR);
 	writew(ENC_EN, host->nfiecc_base + MTKSDG1_ECC_ENCCON);
+	ret = wait_for_completion_timeout(&host->ecc_complete,
+						MTK_DEFAULT_TIMEOUT);
+	if (!ret) {
+		dev_err(host->dev, "ecc encode done timeout!\n");
+		writel(0, host->nfiecc_base + MTKSDG1_ECC_ENCIRQ_EN);
+		ret = -ETIMEDOUT;
+		goto timeout;
+	} else {
+		ret = 0;
+	}
 	mtk_nfc_wait_encidle(host);
 
 	for (i = 0; i < parity_bytes; i++) {
@@ -591,6 +604,7 @@ static int mtk_nfc_sector_encode(struct nand_chip *chip, u8 *data, u8 *parity)
 		}
 	}
 
+timeout:
 	dma_unmap_single(host->dev, dma_addr,
 		(1 << host->sectorsize_shift) + host->fdm_size, DMA_TO_DEVICE);
 	writew(0, host->nfiecc_base + MTKSDG1_ECC_ENCCON);
@@ -753,6 +767,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 						MTK_DEFAULT_TIMEOUT);
 	if (!ret) {
 		dev_err(host->dev, "read busy return timeout!\n");
+		writew(0, host->nfi_base + MTKSDG1_NFC_INTR_EN);
 		ret = -ETIMEDOUT;
 		goto timeout;
 	}
@@ -774,6 +789,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 						MTK_DEFAULT_TIMEOUT);
 	if (!ret) {
 		dev_err(host->dev, "read ahb done timeout!\n");
+		writew(0, host->nfi_base + MTKSDG1_NFC_INTR_EN);
 		ret = -ETIMEDOUT;
 		goto timeout;
 	} else {
@@ -787,6 +803,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 		host->eccdone_sector = 0;
 		if (!ret) {
 			dev_err(host->dev, "ecc decode done timeout!\n");
+			writew(0, host->nfiecc_base + MTKSDG1_ECC_DECIRQ_EN);
 			ret = -ETIMEDOUT;
 			goto timeout;
 		}
