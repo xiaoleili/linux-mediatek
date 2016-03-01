@@ -100,6 +100,11 @@ struct mtk_nfc_host {
 #endif
 };
 
+static struct nand_ecclayout nand_2k_64 = {
+	.oobfree = { {0, 16} },
+	.oobavail = 16,
+};
+
 static struct nand_ecclayout nand_4k_128 = {
 	.oobfree = { {0, 32} },
 	.oobavail = 32,
@@ -347,6 +352,7 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 	switch (mtd->writesize) {
 	case KB(2):
 		fmt = PAGEFMT_512_2K;
+		chip->ecc.layout = &nand_2k_64;
 		break;
 	case KB(4):
 		fmt = PAGEFMT_2K_4K;
@@ -729,16 +735,15 @@ static int mtk_nfc_write_subpage_hwecc(struct mtd_info *mtd,
 		const uint8_t *buf, int oob_on, int pg)
 {
 	struct mtk_nfc_host *host = chip->priv;
-	u32 sectors, start, end;
+	u32 start, end;
 	uint8_t *src, *dst;
 	size_t len;
 	int i, ret;
 
-	sectors = BYTES_TO_SECTORS(data_len + SECTOR_SIZE - 1);
 	len = SECTOR_SIZE + mtd->oobsize / chip->ecc.steps;
 
 	start = BYTES_TO_SECTORS(offset);
-	end = start + sectors;
+	end = BYTES_TO_SECTORS(offset + data_len + SECTOR_SIZE - 1);
 
 	memset(host->buffer, 0xff, mtd->writesize + mtd->oobsize);
 	for (i = 0; i < chip->ecc.steps; i++) {
@@ -888,8 +893,9 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	nfi = &host->nfi.complete;
 	ecc = &host->ecc.complete;
 
-	sectors = BYTES_TO_SECTORS(readlen + SECTOR_SIZE - 1);
 	start_sector = BYTES_TO_SECTORS(data_offs);
+	sectors = BYTES_TO_SECTORS(data_offs + readlen + SECTOR_SIZE - 1);
+	sectors -= start_sector;
 
 	spare = mtd->oobsize / chip->ecc.steps;
 	column =  start_sector * (SECTOR_SIZE + spare);
@@ -973,8 +979,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 		bitflips = mtk_nfc_ecc_check(mtd, chip, buf, sectors);
 		if (bitflips)
 			dev_dbg(host->dev, "ecc bitflips = 0x%x\n", bitflips);
-	}
-	else
+	} else
 		bitflips = 0;
 error:
 	dma_unmap_single(host->dev, dma_addr, len, DMA_FROM_DEVICE);
@@ -1109,6 +1114,36 @@ static int mtk_nfc_read_oob_raw(struct mtd_info *mtd, struct nand_chip *chip,
 	return mtk_nfc_read_page_raw(mtd, chip, buf, MTK_OOB_ON, page);
 }
 
+static int mtk_nfc_block_markbad(struct mtd_info *mtd, loff_t ofs)
+{
+	struct nand_chip *chip = mtd->priv;
+	u8 *buf = chip->buffers->databuf;
+	int ret = 0, res, i = 0, pg;
+
+	memset(buf, 0, mtd->writesize + mtd->oobsize);
+	/* Write to first/last page(s) if necessary */
+	if (chip->bbt_options & NAND_BBT_SCANLASTPAGE)
+		ofs += mtd->erasesize - mtd->writesize;
+	do {
+		pg = (int)(ofs >> chip->page_shift);
+		chip->cmdfunc(mtd, NAND_CMD_SEQIN, 0x00, pg);
+		res = mtk_nfc_write_page(mtd, chip, buf, MTK_OOB_OFF, pg,
+						MTK_ECC_OFF);
+		if (!ret)
+			ret = res;
+		chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
+		res = chip->waitfunc(mtd, chip);
+		res = res & NAND_STATUS_FAIL ? -EIO : 0;
+		if (!ret)
+			ret = res;
+
+		i++;
+		ofs += mtd->writesize;
+	} while ((chip->bbt_options & NAND_BBT_SCAN2NDPAGE) && i < 2);
+
+	return ret;
+}
+
 static inline void mtk_nfc_hw_init(struct mtk_nfc_host *host)
 {
 	mtk_nfi_writel(host, 0x10804211, MTKSDG1_NFI_ACCCON);
@@ -1158,8 +1193,7 @@ static irqreturn_t mtk_ecc_irq(int irq, void *devid)
 				complete(&host->ecc.complete);
 				mtk_ecc_writew(host, 0, MTKSDG1_ECC_DECIRQ_EN);
 			}
-		}
-		else
+		} else
 			dev_warn(host->dev, "spurious DEC_IRQ\n");
 
 		return IRQ_HANDLED;
@@ -1319,6 +1353,7 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 	chip->options |= NAND_USE_BOUNCE_BUFFER | NAND_SUBPAGE_READ;
 	chip->select_chip = mtk_nfc_select_chip;
 	chip->read_byte = mtk_nfc_read_byte;
+	chip->block_markbad = mtk_nfc_block_markbad;
 	chip->cmdfunc = mtk_nfc_cmdfunc;
 	chip->ecc.mode = NAND_ECC_HW;
 	chip->priv = host;
