@@ -1183,13 +1183,14 @@ static irqreturn_t mtk_nfi_irq(int irq, void *devid)
 static irqreturn_t mtk_ecc_irq(int irq, void *devid)
 {
 	struct mtk_nfc_host *host = devid;
-	u32 stat;
+	u32 reg_val, mask;
 
-	stat = mtk_ecc_readw(host, MTKSDG1_ECC_DECIRQ_STA);
-	if (stat & DEC_IRQEN) {
+	reg_val = mtk_ecc_readw(host, MTKSDG1_ECC_DECIRQ_STA);
+	if (reg_val & DEC_IRQEN) {
 		if (host->ecc.dec_sec) {
-			host->ecc.dec_sec--;
-			if (!host->ecc.dec_sec) {
+			mask = 1 << (host->ecc.dec_sec - 1);
+			reg_val = mtk_ecc_readw(host, MTKSDG1_ECC_DECDONE);
+			if (mask & reg_val) {
 				complete(&host->ecc.complete);
 				mtk_ecc_writew(host, 0, MTKSDG1_ECC_DECIRQ_EN);
 			}
@@ -1199,8 +1200,8 @@ static irqreturn_t mtk_ecc_irq(int irq, void *devid)
 		return IRQ_HANDLED;
 	}
 
-	stat = mtk_ecc_readl(host, MTKSDG1_ECC_ENCIRQ_STA);
-	if (stat & ENC_IRQEN) {
+	reg_val = mtk_ecc_readl(host, MTKSDG1_ECC_ENCIRQ_STA);
+	if (reg_val & ENC_IRQEN) {
 		complete(&host->ecc.complete);
 		mtk_ecc_writel(host, 0, MTKSDG1_ECC_ENCIRQ_EN);
 
