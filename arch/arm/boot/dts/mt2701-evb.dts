@@ -27,3 +27,40 @@
 &uart0 {
 	status = "okay";
 };
+
+&pio {
+	pinctrl-names = "default";
+	pinctrl-0 = <&nfi_pins_default>;
+	nfi_pins_default: nfidefault {
+		pins_dat {
+			pinmux = <MT2701_PIN_111_MSDC0_DAT7__FUNC_NLD7>,
+				<MT2701_PIN_112_MSDC0_DAT6__FUNC_NLD6>,
+				<MT2701_PIN_114_MSDC0_DAT4__FUNC_NLD4>,
+				<MT2701_PIN_118_MSDC0_DAT3__FUNC_NLD3>,
+				<MT2701_PIN_121_MSDC0_DAT0__FUNC_NLD0>,
+				<MT2701_PIN_120_MSDC0_DAT1__FUNC_NLD1>,
+				<MT2701_PIN_113_MSDC0_DAT5__FUNC_NLD5>,
+				<MT2701_PIN_115_MSDC0_RSTB__FUNC_NLD8>,
+				<MT2701_PIN_119_MSDC0_DAT2__FUNC_NLD2>;
+			input-enable;
+			drive-strength = <MTK_DRIVE_8mA>;
+			bias-pull-up;
+		};
+
+		pins_we {
+			pinmux = <MT2701_PIN_117_MSDC0_CLK__FUNC_NWEB>;
+			drive-strength = <MTK_DRIVE_8mA>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_10>;
+		};
+
+		pins_ale {
+			pinmux = <MT2701_PIN_116_MSDC0_CMD__FUNC_NALE>;
+			drive-strength = <MTK_DRIVE_8mA>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+		};
+	};
+};
+
+&nand {
+	status = "okay";
+};

@@ -74,6 +74,12 @@
 		clock-output-names = "rtc32k";
 	};
 
+	uart_clk: dummy26m {
+		compatible = "fixed-clock";
+		clock-frequency = <26000000>;
+		#clock-cells = <0>;
+	};
+
 	timer {
 		compatible = "arm,armv7-timer";
 		interrupt-parent = <&gic>;
@@ -105,6 +111,24 @@
 		reg = <0 0x10003000 0 0x1000>;
 		#clock-cells = <1>;
 		#reset-cells = <1>;
+	};
+
+	bring-up {
+		compatible = "mediatek,clk-bring-up", "mediatek,mt8173-bring-up";
+		clocks =
+			<&pericfg CLK_PERI_UART0>,
+			<&pericfg CLK_PERI_UART1>,
+			<&pericfg CLK_PERI_UART2>,
+			<&pericfg CLK_PERI_UART3>,
+			<&pericfg CLK_PERI_UART0_SEL>,
+			<&pericfg CLK_PERI_UART1_SEL>,
+			<&pericfg CLK_PERI_UART2_SEL>,
+			<&pericfg CLK_PERI_UART3_SEL>,
+			<&system_clk>,
+			<&system_clk>;
+
+		clock-names =
+			"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10";
 	};
 
 	pio: pinctrl@10005000 {
@@ -172,38 +196,19 @@
 			     "mediatek,mt6577-uart";
 		reg = <0 0x11002000 0 0x400>;
 		interrupts = <GIC_SPI 51 IRQ_TYPE_LEVEL_LOW>;
-		clocks = <&pericfg CLK_PERI_UART0_SEL>, <&pericfg CLK_PERI_UART0>;
-		clock-names = "baud", "bus";
+		clocks = <&uart_clk>;
 		status = "disabled";
 	};
 
-	uart1: serial@11003000 {
-		compatible = "mediatek,mt2701-uart",
-			     "mediatek,mt6577-uart";
-		reg = <0 0x11003000 0 0x400>;
-		interrupts = <GIC_SPI 52 IRQ_TYPE_LEVEL_LOW>;
-		clocks = <&pericfg CLK_PERI_UART1_SEL>, <&pericfg CLK_PERI_UART1>;
-		clock-names = "baud", "bus";
-		status = "disabled";
-	};
-
-	uart2: serial@11004000 {
-		compatible = "mediatek,mt2701-uart",
-			     "mediatek,mt6577-uart";
-		reg = <0 0x11004000 0 0x400>;
-		interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_LOW>;
-		clocks = <&pericfg CLK_PERI_UART2_SEL>, <&pericfg CLK_PERI_UART2>;
-		clock-names = "baud", "bus";
-		status = "disabled";
-	};
-
-	uart3: serial@11005000 {
-		compatible = "mediatek,mt2701-uart",
-			     "mediatek,mt6577-uart";
-		reg = <0 0x11005000 0 0x400>;
-		interrupts = <GIC_SPI 54 IRQ_TYPE_LEVEL_LOW>;
-		clocks = <&pericfg CLK_PERI_UART3_SEL>, <&pericfg CLK_PERI_UART3>;
-		clock-names = "baud", "bus";
-		status = "disabled";
+	nand: nfi@1100d000 {
+			compatible = "mediatek,mt2701-nfc";
+			reg = <0 0x1100d000 0 0x1000>, <0 0x1100e000 0 0x1000>;
+			interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_LOW>,
+				     <GIC_SPI 55 IRQ_TYPE_LEVEL_LOW>;
+			clocks = <&pericfg CLK_PERI_NFI>, <&pericfg CLK_PERI_NFI_ECC>,
+				 <&pericfg CLK_PERI_NFI_PAD>;
+			clock-names = "nfi_clk", "nfiecc_clk", "pad_clk";
+			nand-on-flash-bbt;
+			status = "disabled";
 	};
 };
