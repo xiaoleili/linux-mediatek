@@ -4114,6 +4114,35 @@ static bool nand_ecc_strength_good(struct mtd_info *mtd)
 	return corr >= ds_corr && ecc->strength >= chip->ecc_strength_ds;
 }
 
+int erase_block_test(struct mtd_info *mtd, unsigned int ebnum)
+{
+	struct nand_chip *chip = mtd->priv;
+        int err;
+        struct erase_info ei;
+        loff_t addr = (loff_t)ebnum * mtd->erasesize;
+
+        memset(&ei, 0, sizeof(struct erase_info));
+        ei.mtd  = mtd;
+        ei.addr = addr;
+        ei.len  = mtd->erasesize;
+
+	/*
+        err = nand_erase(mtd, &ei, 1);
+        if (err) {
+                pr_info("error %d while erasing EB %d\n", err, ebnum);
+                return err;
+        }
+
+        if (ei.state == MTD_ERASE_FAILED) {
+                pr_info("some erase error occurred at EB %d\n", ebnum);
+                return -EIO;
+        }
+	*/
+	chip->select_chip(mtd, 0);
+	single_erase(mtd, ebnum * 64);
+        return 0;
+}
+
 /**
  * nand_scan_tail - [NAND Interface] Scan for the NAND device
  * @mtd: MTD device structure
@@ -4418,6 +4447,13 @@ int nand_scan_tail(struct mtd_info *mtd)
 	/* Check, if we should skip the bad block table scan */
 	if (chip->options & NAND_SKIP_BBTSCAN)
 		return 0;
+
+for (i = 0; i < 2048; i++)
+erase_block_test(mtd, i);
+//erase_block_test(mtd, 2044);
+//erase_block_test(mtd, 2045);
+//erase_block_test(mtd, 2046);
+//erase_block_test(mtd, 2047);
 
 	/* Build bad block table */
 	return chip->scan_bbt(mtd);
