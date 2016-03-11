@@ -1243,8 +1243,9 @@ static int mtk_nfc_resume(struct device *dev)
 {
 	struct mtk_nfc *nfc = dev_get_drvdata(dev);
 	struct mtk_nfc_saved_reg *reg = &nfc->saved_reg;
-	struct nand_chip *chip = &nfc->chip;
-	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct mtk_nfc_nand_chip *chip;
+	struct nand_chip *nand;
+	struct mtd_info *mtd;
 	int ret;
 	u32 i;
 
@@ -1254,9 +1255,13 @@ static int mtk_nfc_resume(struct device *dev)
 	if (ret)
 		return ret;
 
-	for (i = 0; i < chip->numchips; i++) {
-		chip->select_chip(mtd, i);
-		chip->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
+	list_for_each_entry(chip, &nfc->chips, node) {
+		nand = &chip->nand;
+		mtd = nand_to_mtd(nand);
+		for (i = 0; i < chip->nsels; i++) {
+			nand->select_chip(mtd, i);
+			nand->cmdfunc(mtd, NAND_CMD_RESET, -1, -1);
+		}
 	}
 
 	sdg1_writel(nfc, reg->emp_thresh, MTKSDG1_NFI_EMPTY_THRESH);
