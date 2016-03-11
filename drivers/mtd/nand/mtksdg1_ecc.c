@@ -303,18 +303,15 @@ static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, uns
 {
 	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	u32 ecc_bit, ecc_level;
-	u32 dec_sz, enc_sz;
+	u32 ecc_bit, dec_sz, enc_sz;
 	u32 reg;
 
-	switch (mtd->oobsize / BYTES_TO_SECTORS(mtd->writesize)) {
-	case 16:
+	switch (chip->ecc.strength) {
+	case 4:
 		ecc_bit = ECC_CNFG_4BIT;
-		ecc_level = 4;
 		break;
-	case 32:
+	case 12:
 		ecc_bit = ECC_CNFG_12BIT;
-		ecc_level = 12;
 		break;
 	default:
 		dev_err(ecc->dev, "invalid spare size per sector\n");
@@ -334,16 +331,13 @@ static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, uns
 		return -EINVAL;
 	}
 
-	chip->ecc.strength = ecc_level;
-	chip->ecc.size = SECTOR_SIZE;
-
 	/* configure ECC encoder (in bits) : TODO Nfi register? */
 	enc_sz = len << 3;
 	reg = ecc_bit | ECC_NFI_MODE | (enc_sz << ECC_MS_SHIFT);
 	writel(reg, ecc->regs + MTKSDG1_ECC_ENCCNFG);
 
 	/* configure ECC decoder (in bits) */
-	dec_sz = enc_sz + ecc_level * MTK_ECC_PARITY_BITS;
+	dec_sz = enc_sz + chip->ecc.strength * MTK_ECC_PARITY_BITS;
 	reg = ecc_bit | ECC_NFI_MODE | (dec_sz << ECC_MS_SHIFT);
 	reg |= (DEC_CNFG_CORRECT | DEC_EMPTY_EN);
 	writel(reg, ecc->regs + MTKSDG1_ECC_DECCNFG);
