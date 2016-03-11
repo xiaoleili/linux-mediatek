@@ -13,8 +13,8 @@
  * GNU General Public License for more details.
  */
 
-#ifndef MTKSDG1_NAND_NFI_H
-#define MTKSDG1_NAND_NFI_H
+#ifndef MTKSDG1_NFI_REGS_H
+#define MTKSDG1_NFI_REGS_H
 
 /* NAND controller register definition */
 #define MTKSDG1_NFI_CNFG		(0x00)

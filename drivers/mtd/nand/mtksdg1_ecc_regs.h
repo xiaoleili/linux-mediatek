@@ -13,8 +13,8 @@
  * GNU General Public License for more details.
  */
 
-#ifndef MTKSDG1_NAND_ECC_H
-#define MTKSDG1_NAND_ECC_H
+#ifndef MTKSDG1_ECC_REGS_H
+#define MTKSDG1_ECC_REGS_H
 
 /* ECC engine register definition */
 #define MTKSDG1_ECC_ENCCON		(0x00)

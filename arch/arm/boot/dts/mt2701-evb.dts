@@ -64,3 +64,8 @@
 &nand {
 	status = "okay";
 };
+
+&bch {
+	status = "okay";
+};
+
