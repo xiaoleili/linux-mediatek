@@ -29,9 +29,7 @@
 };
 
 &pio {
-	pinctrl-names = "default";
-	pinctrl-0 = <&nfi_pins_default>;
-	nfi_pins_default: nfidefault {
+	nand_pins_default: nanddefault {
 		pins_dat {
 			pinmux = <MT2701_PIN_111_MSDC0_DAT7__FUNC_NLD7>,
 				<MT2701_PIN_112_MSDC0_DAT6__FUNC_NLD6>,
@@ -63,6 +61,11 @@
 
 &nand {
 	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&nand_pins_default>;
+	chip@0 {
+		reg = <0>;
+	};
 };
 
 &bch {
