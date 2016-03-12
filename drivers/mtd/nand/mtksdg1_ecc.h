@@ -17,11 +17,6 @@
 #define KB(x)			((x) * 1024UL)
 #define MB(x)			(KB(x) * 1024UL)
 
-#define SECTOR_SHIFT		(10)
-#define SECTOR_SIZE		(1UL << SECTOR_SHIFT)
-#define BYTES_TO_SECTORS(x)	((x) >> SECTOR_SHIFT)
-#define SECTORS_TO_BYTES(x)	((x) << SECTOR_SHIFT)
-
 struct sdg1_ecc_if;
 struct device_node;
 struct nand_chip;
@@ -42,27 +37,25 @@ struct sdg1_encode_params {
 	u8 *data;
 };
 
+typedef int (*config) (struct sdg1_ecc_if *, struct mtd_info *, unsigned);
+typedef int (*encode)(struct sdg1_ecc_if *, struct sdg1_encode_params *);
+typedef void (*control)(struct sdg1_ecc_if *, enum sdg1_ecc_ctrl, int);
+typedef int (*check)(struct sdg1_ecc_if *, struct mtd_info *, u32);
+typedef void (*release)(struct sdg1_ecc_if *);
+typedef int (*decode)(struct sdg1_ecc_if *);
+typedef void (*init) (struct sdg1_ecc_if *);
 
-typedef int (*config_f) (struct sdg1_ecc_if *, struct mtd_info *, unsigned);
-typedef void (*control_f)(struct sdg1_ecc_if *, enum sdg1_ecc_ctrl, int);
-typedef void (*init_f) (struct sdg1_ecc_if *);
-
-/**
- * MTK specific functions
- *
- * @author jramirez (3/10/2016)
- */
 struct sdg1_ecc_if {
-	control_f control;
-	config_f config;
-	init_f init;
+	release	release;
+	control control;
+	encode encode;
+	decode decode;
+	config config;
+	check check;
+	init init;
 };
 
 /* these functions will go into the new API */
 struct sdg1_ecc_if *of_sdg1_ecc_get(struct device_node *);
-void sdg1_ecc_release(struct sdg1_ecc_if *);
-int sdg1_ecc_encode(struct sdg1_ecc_if *, struct sdg1_encode_params *);
-int sdg1_ecc_decode(struct sdg1_ecc_if *);
-int sdg1_ecc_check(struct sdg1_ecc_if *, struct mtd_info *, u32);
 
 #endif

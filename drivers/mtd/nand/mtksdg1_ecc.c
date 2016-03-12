@@ -114,7 +114,8 @@ static irqreturn_t sdg1_ecc_irq(int irq, void *devid)
 }
 
 
-int sdg1_ecc_check(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, u32 sectors)
+static int sdg1_ecc_check(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd,
+	u32 sectors)
 {
 	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	u32 offset, i, err;
@@ -138,7 +139,7 @@ int sdg1_ecc_check(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, u32 sectors
 	return bitflips;
 }
 
-void sdg1_ecc_release(struct sdg1_ecc_if *ecc_if)
+static void sdg1_ecc_release(struct sdg1_ecc_if *ecc_if)
 {
 	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 
@@ -212,7 +213,7 @@ static void sdg1_ecc_control(struct sdg1_ecc_if *ecc_if,
 	}
 }
 
-int sdg1_ecc_decode(struct sdg1_ecc_if *ecc_if)
+static int sdg1_ecc_decode(struct sdg1_ecc_if *ecc_if)
 {
 	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	int ret;
@@ -226,7 +227,8 @@ int sdg1_ecc_decode(struct sdg1_ecc_if *ecc_if)
 	return 0;
 }
 
-int sdg1_ecc_encode(struct sdg1_ecc_if *ecc_if, struct sdg1_encode_params *p)
+static int sdg1_ecc_encode(struct sdg1_ecc_if *ecc_if,
+	struct sdg1_encode_params *p)
 {
 	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	u32 *parity_region, parity_bytes;
@@ -392,8 +394,12 @@ static int sdg1_ecc_probe(struct platform_device *pdev)
 	ecc->dev = dev;
 
 	ecc->intf.control = sdg1_ecc_control;
+	ecc->intf.release = sdg1_ecc_release;
 	ecc->intf.config = sdg1_ecc_config;
+	ecc->intf.decode = sdg1_ecc_decode;
+	ecc->intf.encode = sdg1_ecc_encode;
 	ecc->intf.init = sdg1_ecc_hw_init;
+	ecc->intf.check = sdg1_ecc_check;
 
 	platform_set_drvdata(pdev, ecc);
 
@@ -458,11 +464,7 @@ static struct platform_driver sdg1_ecc_driver = {
 
 module_platform_driver(sdg1_ecc_driver);
 
-EXPORT_SYMBOL(sdg1_ecc_release);
-EXPORT_SYMBOL(sdg1_ecc_check);
 EXPORT_SYMBOL(of_sdg1_ecc_get);
-EXPORT_SYMBOL(sdg1_ecc_decode);
-EXPORT_SYMBOL(sdg1_ecc_encode);
 
 MODULE_AUTHOR("Xiaolei Li <xiaolei.li@mediatek.com>");
 MODULE_AUTHOR("Jorge Ramirez-Ortiz <jorge.ramirez-ortiz@linaro.org>");
