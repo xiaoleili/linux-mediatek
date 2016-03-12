@@ -240,7 +240,7 @@ static void mtk_nfc_select_chip(struct mtd_info *mtd, int chip)
 	struct mtk_nfc *nfc = nand_get_controller_data(nand);
 	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(nand);
 
-	if (chip < 0 )
+	if (chip < 0)
 		return;
 
 	sdg1_writel(nfc, mtk_nand->sels[chip], MTKSDG1_NFI_CSEL);
@@ -578,7 +578,7 @@ static int mtk_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	}
 
 	dmasize = mtd->writesize + (raw ? mtd->oobsize : 0);
-	ret = mtk_nfc_do_write_page(mtd,chip, buf, page, dmasize);
+	ret = mtk_nfc_do_write_page(mtd, chip, buf, page, dmasize);
 
 	if (ecc)
 		nfc->ecc->control(nfc->ecc, disable_encoder, 0);
@@ -997,6 +997,40 @@ static void mtk_nfc_disable_clk(struct mtk_nfc_clk *clk)
 	clk_disable_unprepare(clk->pad_clk);
 }
 
+static int mtk_nfc_ooblayout_free(struct mtd_info *mtd, int section,
+				struct mtd_oob_region *oobregion)
+{
+	struct nand_chip *chip = mtd_to_nand(mtd);
+
+	if (section)
+		return -ERANGE;
+
+	oobregion->offset = 0;
+	oobregion->length = MTKSDG1_NFI_FDM_REG_SIZE * chip->ecc.steps;
+
+	return 0;
+}
+
+static int mtk_nfc_ooblayout_ecc(struct mtd_info *mtd, int section,
+				struct mtd_oob_region *oobregion)
+{
+	struct mtd_oob_region free;
+
+	if (section)
+		return -ERANGE;
+
+	mtk_nfc_ooblayout_free(mtd, 0, &free);
+	oobregion->offset = free.length;
+	oobregion->length = mtd->oobsize - oobregion->offset;
+
+	return 0;
+}
+
+static const struct mtd_ooblayout_ops mtk_nfc_ooblayout_ops = {
+	.ecc = mtk_nfc_ooblayout_ecc,
+	.free = mtk_nfc_ooblayout_free,
+};
+
 static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 				struct device_node *np)
 {
@@ -1013,16 +1047,14 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 
 	nsels /= sizeof(u32);
 	if (!nsels || nsels > MTK_NAND_MAX_NSELS) {
-		dev_err(dev, "invalid reg property size %d \n", nsels);
+		dev_err(dev, "invalid reg property size %d\n", nsels);
 		return -EINVAL;
 	}
 
 	chip = devm_kzalloc(dev,
-			    sizeof(*chip) + nsels * sizeof(u8), GFP_KERNEL);
-	if (!chip) {
-		dev_err(dev, "could not allocate chip\n");
+			sizeof(*chip) + nsels * sizeof(u8), GFP_KERNEL);
+	if (!chip)
 		return -ENOMEM;
-	}
 
 	chip->nsels = nsels;
 
@@ -1063,6 +1095,7 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	mtd->owner = THIS_MODULE;
 	mtd->dev.parent = dev;
 	mtd->name = MTK_NAME;
+	mtd_set_ooblayout(mtd, &mtk_nfc_ooblayout_ops);
 
 	mtk_nfc_hw_init(nfc);
 

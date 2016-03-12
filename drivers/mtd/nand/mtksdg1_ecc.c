@@ -33,14 +33,6 @@
 #define ECC_TIMEOUT		(500000)
 #define MTK_ECC_PARITY_BITS	(14)
 
-static struct nand_ecclayout nand_2k_64 = {
-	.oobfree = { {0, 16} },
-};
-
-static struct nand_ecclayout nand_4k_128 = {
-	.oobfree = { {0, 32} },
-};
-
 struct sdg1_pm_regs {
 	u32 enccnfg;
 	u32 deccnfg;
@@ -178,6 +170,7 @@ struct sdg1_ecc_if *of_sdg1_ecc_get(struct device_node *of_node)
 
 	return ecc_if;
 }
+EXPORT_SYMBOL(of_sdg1_ecc_get);
 
 static void sdg1_ecc_control(struct sdg1_ecc_if *ecc_if,
 	enum sdg1_ecc_ctrl ctrl, int arg)
@@ -185,7 +178,7 @@ static void sdg1_ecc_control(struct sdg1_ecc_if *ecc_if,
 	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	int sectors;
 
-	switch(ctrl) {
+	switch (ctrl) {
 	case enable_encoder:
 		sdg1_ecc_encoder_idle(ecc);
 		writew(ENC_EN, ecc->regs + MTKSDG1_ECC_ENCCON);
@@ -320,19 +313,6 @@ static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, uns
 		return -EINVAL;
 	}
 
-	switch (mtd->writesize) {
-	case KB(2):
-		chip->ecc.layout = &nand_2k_64;
-		break;
-	case KB(4):
-		chip->ecc.layout = &nand_4k_128;
-		break;
-	case KB(8):
-		break;
-	default:
-		return -EINVAL;
-	}
-
 	/* configure ECC encoder (in bits) : TODO Nfi register? */
 	enc_sz = len << 3;
 	reg = ecc_bit | ECC_NFI_MODE | (enc_sz << ECC_MS_SHIFT);
@@ -463,8 +443,6 @@ static struct platform_driver sdg1_ecc_driver = {
 };
 
 module_platform_driver(sdg1_ecc_driver);
-
-EXPORT_SYMBOL(of_sdg1_ecc_get);
 
 MODULE_AUTHOR("Xiaolei Li <xiaolei.li@mediatek.com>");
 MODULE_AUTHOR("Jorge Ramirez-Ortiz <jorge.ramirez-ortiz@linaro.org>");
