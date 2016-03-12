@@ -168,6 +168,12 @@ typedef enum {
 /* Device supports subpage reads */
 #define NAND_SUBPAGE_READ	0x00001000
 
+/*
+ * Some MLC NANDs need data scrambling to limit bitflips caused by repeated
+ * patterns.
+ */
+#define NAND_NEED_SCRAMBLING	0x00002000
+
 /* Options valid for Samsung large page devices */
 #define NAND_SAMSUNG_LP_OPTIONS NAND_CACHEPRG
 
@@ -460,7 +466,6 @@ struct nand_hw_control {
  * @prepad:	padding information for syndrome based ECC generators
  * @postpad:	padding information for syndrome based ECC generators
  * @options:	ECC specific options (see NAND_ECC_XXX flags defined above)
- * @layout:	ECC layout control struct pointer
  * @priv:	pointer to private ECC control data
  * @hwctl:	function to control hardware ECC generator. Must only
  *		be provided if an hardware ECC is available
@@ -510,7 +515,6 @@ struct nand_ecc_ctrl {
 	int prepad;
 	int postpad;
 	unsigned int options;
-	struct nand_ecclayout	*layout;
 	void *priv;
 	void (*hwctl)(struct mtd_info *mtd, int mode);
 	int (*calculate)(struct mtd_info *mtd, const uint8_t *dat,
@@ -734,6 +738,9 @@ struct nand_chip {
 	void *priv;
 };
 
+extern const struct mtd_ooblayout_ops nand_ooblayout_sp_ops;
+extern const struct mtd_ooblayout_ops nand_ooblayout_lp_ops;
+
 static inline void nand_set_flash_node(struct nand_chip *chip,
 				       struct device_node *np)
 {
@@ -896,7 +903,6 @@ extern int nand_do_read(struct mtd_info *mtd, loff_t from, size_t len,
  * @chip_delay:		R/B delay value in us
  * @options:		Option flags, e.g. 16bit buswidth
  * @bbt_options:	BBT option flags, e.g. NAND_BBT_USE_FLASH
- * @ecclayout:		ECC layout info structure
  * @part_probe_types:	NULL-terminated array of probe types
  */
 struct platform_nand_chip {
@@ -904,7 +910,6 @@ struct platform_nand_chip {
 	int chip_offset;
 	int nr_partitions;
 	struct mtd_partition *partitions;
-	struct nand_ecclayout *ecclayout;
 	int chip_delay;
 	unsigned int options;
 	unsigned int bbt_options;
