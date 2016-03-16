@@ -259,10 +259,7 @@ static int sdg1_ecc_encode(struct sdg1_ecc_if *ecc_if,
 
 	sdg1_ecc_encoder_idle(ecc);
 
-	/**
-	 * Program ECC bytes to OOB
-	 *	per sector oob = FDM + ECC + SPARE
-	 */
+	/* Program ECC bytes to OOB: per sector oob = FDM + ECC + SPARE */
 	parity_region = (u32 *) (p->data + p->len);
 	parity_bytes = (p->strength * MTK_ECC_PARITY_BITS + 7) >> 3;
 
@@ -313,7 +310,7 @@ static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, uns
 		return -EINVAL;
 	}
 
-	/* configure ECC encoder (in bits) : TODO Nfi register? */
+	/* configure ECC encoder (in bits) */
 	enc_sz = len << 3;
 	reg = ecc_bit | ECC_NFI_MODE | (enc_sz << ECC_MS_SHIFT);
 	writel(reg, ecc->regs + MTKSDG1_ECC_ENCCNFG);

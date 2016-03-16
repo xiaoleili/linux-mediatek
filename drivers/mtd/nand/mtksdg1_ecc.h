@@ -14,9 +14,6 @@
 
 #include <linux/types.h>
 
-#define KB(x)			((x) * 1024UL)
-#define MB(x)			(KB(x) * 1024UL)
-
 struct sdg1_ecc_if;
 struct device_node;
 struct nand_chip;
