@@ -36,13 +36,13 @@
 #define		PAGEFMT_FDM_ECC_SHIFT	(12)
 #define		PAGEFMT_FDM_SHIFT	(8)
 #define		PAGEFMT_SPARE_16	(0)
-#define		PAGEFMT_SPARE_32	(4)
+#define		PAGEFMT_SPARE_28	(3)
 #define		PAGEFMT_SPARE_SHIFT	(4)
 #define		PAGEFMT_SEC_SEL_512	BIT(2)
 #define		PAGEFMT_512_2K		(0)
 #define		PAGEFMT_2K_4K		(1)
 #define		PAGEFMT_4K_8K		(2)
-
+#define		PAGEFMT_8K_16K		(3)
 /* NFI control */
 #define MTKSDG1_NFI_CON			(0x08)
 #define		CON_FIFO_FLUSH		BIT(0)
@@ -85,6 +85,7 @@
 #define		STA_ADDR		BIT(1)
 #define		STA_DATAR		BIT(2)
 #define		STA_DATAW		BIT(3)
+#define		STA_BUSY		BIT(8)
 #define		STA_EMP_PAGE		BIT(12)
 
 #define MTKSDG1_NFI_FIFOSTA		(0x64)

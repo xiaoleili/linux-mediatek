@@ -24,6 +24,7 @@
 #define MTKSDG1_ECC_ENCCNFG		(0x04)
 #define		ECC_CNFG_4BIT		(0)
 #define		ECC_CNFG_12BIT		(4)
+#define		ECC_CNFG_24BIT		(10)
 #define		ECC_NFI_MODE		BIT(5)
 #define		ECC_DMA_MODE		(0)
 #define		ECC_ENC_MODE_MASK	(0x3 << 5)

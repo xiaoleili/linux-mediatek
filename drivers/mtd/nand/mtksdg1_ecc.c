@@ -305,6 +305,9 @@ static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd, uns
 	case 12:
 		ecc_bit = ECC_CNFG_12BIT;
 		break;
+	case 24:
+		ecc_bit = ECC_CNFG_24BIT;
+		break;
 	default:
 		dev_err(ecc->dev, "invalid spare size per sector\n");
 		return -EINVAL;

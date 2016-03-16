@@ -65,7 +65,8 @@
 	pinctrl-0 = <&nand_pins_default>;
 	chip@0 {
 		reg = <0>;
-		nand-ecc-strength = <12>;
+		spare_per_sector = <56>;
+		nand-ecc-strength = <24>;
 		nand-ecc-step-size = <1024>;
 		partitions {
 			compatible = "fixed-partitions";
