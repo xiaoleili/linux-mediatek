@@ -87,6 +87,8 @@
 #define		STA_DATAW		BIT(3)
 #define		STA_BUSY		BIT(8)
 #define		STA_EMP_PAGE		BIT(12)
+#define		NFI_FSM_CUSTDATA	(0xe << 16)
+#define		NFI_FSM_MASK		(0xf << 16)
 
 #define MTKSDG1_NFI_FIFOSTA		(0x64)
 
