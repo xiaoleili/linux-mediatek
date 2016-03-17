@@ -229,8 +229,6 @@ static int sdg1_ecc_encode(struct sdg1_ecc_if *ecc_if,
 	u32 reg, i;
 	int rc, ret = 0;
 
-	struct completion *done = &ecc->done;
-
 	addr = dma_map_single(ecc->dev, p->data, p->len, DMA_TO_DEVICE);
 	if (dma_mapping_error(ecc->dev, addr)) {
 		dev_err(ecc->dev, "dma mapping error\n");
@@ -246,10 +244,10 @@ static int sdg1_ecc_encode(struct sdg1_ecc_if *ecc_if,
 	writel(ENC_IRQEN, ecc->regs + MTKSDG1_ECC_ENCIRQ_EN);
 	writel(lower_32_bits(addr), ecc->regs + MTKSDG1_ECC_ENCDIADDR);
 
-	init_completion(done);
+	init_completion(&ecc->done);
 	writew(ENC_EN, ecc->regs + MTKSDG1_ECC_ENCCON);
 
-	rc = wait_for_completion_timeout(done, msecs_to_jiffies(500));
+	rc = wait_for_completion_timeout(&ecc->done, msecs_to_jiffies(500));
 	if (!rc) {
 		dev_err(ecc->dev, "encode timeout\n");
 		writel(0, ecc->regs + MTKSDG1_ECC_ENCIRQ_EN);
@@ -363,7 +361,7 @@ static int sdg1_ecc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = devm_request_irq(dev, irq, sdg1_ecc_irq, 0x0, "ecc-irq", ecc);
+	ret = devm_request_irq(dev, irq, sdg1_ecc_irq, 0x0, "mtk-ecc-irq", ecc);
 	if (ret) {
 		dev_err(dev, "failed to request irq\n");
 		return -EINVAL;

@@ -26,14 +26,14 @@
 #include <linux/module.h>
 #include <linux/iopoll.h>
 
-#define KB(x)			((x) * 1024UL)
-#define MB(x)			(KB(x) * 1024UL)
 
 #include "mtksdg1_nfi_regs.h"
 #include "mtksdg1_ecc.h"
 
-#define MTK_IRQ_NFI		"mtksdg1-nand-nfi"
 #define MTK_NAME		"mtksdg1-nand"
+
+#define KB(x)			((x) * 1024UL)
+#define MB(x)			(KB(x) * 1024UL)
 
 #define MTK_TIMEOUT		(500000)
 #define MTK_RESET_TIMEOUT	(1000000)
@@ -45,8 +45,9 @@
 /* raw accesses do not use ECC (ecc = !raw) */
 #define ECC_OFF		(1)
 #define ECC_ON		(0)
-#define OOB_ON		(1)
+
 #define OOB_OFF		(0)
+#define OOB_ON		(1)
 
 struct mtk_nfc_clk {
 	struct clk *nfi_clk;
@@ -81,7 +82,6 @@ struct mtk_nfc {
 	struct list_head chips;
 
 	bool switch_oob;
-	u32 row_nob;
 	u8 *buffer;
 
 #ifdef CONFIG_PM_SLEEP
@@ -94,11 +94,16 @@ static inline struct mtk_nfc_nand_chip *to_mtk_nand(struct nand_chip *nand)
 	return container_of(nand, struct mtk_nfc_nand_chip, nand);
 }
 
+static inline int data_len(struct nand_chip *chip)
+{
+	return chip->ecc.size;
+}
+
 static inline int sdg1_data_len(struct nand_chip *chip)
 {
 	struct mtd_info *mtd = nand_to_mtd(chip);
 
-	return chip->ecc.size + mtd->oobsize / chip->ecc.steps;
+	return data_len(chip) + mtd->oobsize / chip->ecc.steps;
 }
 
 static inline uint8_t *sdg1_data_ptr(struct nand_chip *chip,  int i)
@@ -117,18 +122,13 @@ static inline uint8_t *sdg1_oob_ptr(struct nand_chip *chip, int i)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 
-	return nfc->buffer + i * sdg1_data_len(chip) + chip->ecc.size;
+	return nfc->buffer + i * sdg1_data_len(chip) + data_len(chip);
 }
 
 static inline int sdg1_step_len(struct nand_chip *chip)
 {
 	/* CRC protected per step */
-	return chip->ecc.size + sdg1_oob_len();
-}
-
-static inline int data_len(struct nand_chip *chip)
-{
-	return chip->ecc.size;
+	return data_len(chip) + sdg1_oob_len();
 }
 
 static inline uint8_t *data_ptr(struct nand_chip *chip, const uint8_t *p, int i)
@@ -139,11 +139,6 @@ static inline uint8_t *data_ptr(struct nand_chip *chip, const uint8_t *p, int i)
 static inline uint8_t *oob_ptr(struct nand_chip *chip, int i)
 {
 	return chip->oob_poi + i * sdg1_oob_len();
-}
-
-static inline struct mtk_nfc *to_mtk_nfc(struct nand_hw_control *ctrl)
-{
-	return container_of(ctrl, struct mtk_nfc, controller);
 }
 
 /* NFI register access */
@@ -186,7 +181,7 @@ static void mtk_nfc_hw_reset(struct mtk_nfc *nfc)
 		dev_warn(dev, "master active in reset [0x%x] = 0x%x\n",
 			MTKSDG1_NFI_MASTER_STA, val);
 
-	/* reset CUSTOM mode r/w trigger */
+	/* reset CUSTOM mode trigger */
 	sdg1_writew(nfc, 0, MTKSDG1_NFI_STRDATA);
 }
 
@@ -218,7 +213,6 @@ static int mtk_nfc_set_address(struct mtk_nfc *nfc, int dat)
 	sdg1_writel(nfc, 0, MTKSDG1_NFI_ROWADDR);
 	sdg1_writew(nfc, 1, MTKSDG1_NFI_ADDRNOB);
 
-	/* wait for the NFI core to enter address mode */
 	ret = readl_poll_timeout_atomic(nfc->regs + MTKSDG1_NFI_STA, val,
 		(!(val & STA_ADDR)), 10, MTK_TIMEOUT);
 	if (ret) {
@@ -236,10 +230,6 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	struct device *dev = nfc->dev;
 	u32 fmt, spare = mtk_nand->sparesize;
-
-	nfc->row_nob = 1;
-	if (chip->chipsize > MB(32))
-		nfc->row_nob = chip->chipsize > MB(128) ? 3 : 2;
 
 	switch (mtd->writesize) {
 	case 512:
@@ -270,10 +260,9 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 		fmt |= (PAGEFMT_SPARE_28 << PAGEFMT_SPARE_SHIFT);
 		break;
 	default:
-		/* add more setting later*/
 		break;
 	}
-	mtd->oobsize = mtk_nand->sparesize * (mtd->writesize / chip->ecc.size);
+	mtd->oobsize = mtk_nand->sparesize * (mtd->writesize / data_len(chip));
 
 	fmt |= MTKSDG1_NFI_FDM_REG_SIZE << PAGEFMT_FDM_SHIFT;
 	fmt |= MTKSDG1_NFI_FDM_REG_SIZE << PAGEFMT_FDM_ECC_SHIFT;
@@ -338,10 +327,6 @@ static uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 	u32 reg;
 
 	reg = sdg1_readl(nfc, MTKSDG1_NFI_STA) & NFI_FSM_MASK;
-
-	/*jump to custom access data state machine from custom mode
-	 * by NFI_STRDATA trigger.
-	 */
 	if (reg != NFI_FSM_CUSTDATA) {
 		reg = sdg1_readw(nfc, MTKSDG1_NFI_CNFG);
 		reg |= CNFG_BYTE_RW | CNFG_READ_EN;
@@ -350,9 +335,7 @@ static uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 		reg = (MTK_MAX_SECTOR << CON_SEC_SHIFT) | CON_BRD;
 		sdg1_writel(nfc, reg, MTKSDG1_NFI_CON);
 
-		/* trigger to sample data in CUSTOM_MODE */
 		sdg1_writew(nfc, 1, MTKSDG1_NFI_STRDATA);
-		/* wait for first time FIFO full */
 		udelay(10);
 	}
 
@@ -385,7 +368,6 @@ static void mtk_nfc_write_byte(struct mtd_info *mtd, uint8_t byte)
 		reg = MTK_MAX_SECTOR << CON_SEC_SHIFT | CON_BWR;
 		sdg1_writel(nfc, reg, MTKSDG1_NFI_CON);
 
-		/* trigger to sample data in CUSTOM_MODE */
 		sdg1_writew(nfc, 1, MTKSDG1_NFI_STRDATA);
 	}
 
@@ -413,8 +395,8 @@ static int mtk_nfc_format_subpage(struct mtd_info *mtd, uint32_t offset,
 	u32 start, end;
 	int i, ret;
 
-	start = offset / chip->ecc.size;
-	end = DIV_ROUND_UP(offset + len, chip->ecc.size);
+	start = offset / data_len(chip);
+	end = DIV_ROUND_UP(offset + len, data_len(chip));
 
 	memset(nfc->buffer, 0xff, mtd->writesize + mtd->oobsize);
 	for (i = 0; i < chip->ecc.steps; i++) {
@@ -456,7 +438,7 @@ static void mtk_nfc_format_page(struct mtd_info *mtd, const uint8_t *buf,
 	}
 }
 
-static void mtk_nfc_read_fdm(struct nand_chip *chip, u32 sectors)
+static inline void mtk_nfc_read_fdm(struct nand_chip *chip, u32 sectors)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	u32 *p;
@@ -464,14 +446,12 @@ static void mtk_nfc_read_fdm(struct nand_chip *chip, u32 sectors)
 
 	for (i = 0; i < sectors; i++) {
 		p = (u32 *) oob_ptr(chip, i);
-		*p = sdg1_readl(nfc, MTKSDG1_NFI_FDM0L + i * sdg1_oob_len());
-
-		p = p + 1;
-		*p = sdg1_readl(nfc, MTKSDG1_NFI_FDM0M + i * sdg1_oob_len());
+		p[0] = sdg1_readl(nfc, MTKSDG1_NFI_FDM0L + i * sdg1_oob_len());
+		p[1] = sdg1_readl(nfc, MTKSDG1_NFI_FDM0M + i * sdg1_oob_len());
 	}
 }
 
-static void mtk_nfc_write_fdm(struct nand_chip *chip)
+static inline void mtk_nfc_write_fdm(struct nand_chip *chip)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	u32 *p;
@@ -479,10 +459,8 @@ static void mtk_nfc_write_fdm(struct nand_chip *chip)
 
 	for (i = 0; i < chip->ecc.steps ; i++) {
 		p = (u32 *) oob_ptr(chip, i);
-		sdg1_writel(nfc, *p, MTKSDG1_NFI_FDM0L + i * sdg1_oob_len());
-
-		p = p + 1;
-		sdg1_writel(nfc, *p, MTKSDG1_NFI_FDM0M + i * sdg1_oob_len());
+		sdg1_writel(nfc, p[0], MTKSDG1_NFI_FDM0L + i * sdg1_oob_len());
+		sdg1_writel(nfc, p[1], MTKSDG1_NFI_FDM0M + i * sdg1_oob_len());
 	}
 }
 
@@ -517,7 +495,6 @@ static int mtk_nfc_do_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	/* start DMA */
 	reg = sdg1_readl(nfc, MTKSDG1_NFI_CON) | CON_BWR;
 	sdg1_writel(nfc, reg, MTKSDG1_NFI_CON);
-	/* trigger to sample data in CUSTOM_MODE */
 	sdg1_writew(nfc, 1, MTKSDG1_NFI_STRDATA);
 
 	ret = wait_for_completion_timeout(nfi, msecs_to_jiffies(500));
@@ -649,7 +626,7 @@ static int mtk_nfc_update_oob(struct mtd_info *mtd, struct nand_chip *chip,
 
 	if (sdg1_readl(nfc, MTKSDG1_NFI_STA) & STA_EMP_PAGE) {
 		/* no bitflips, clear data and oob */
-		memset(buf, 0xff, sectors * chip->ecc.size);
+		memset(buf, 0xff, sectors * data_len(chip));
 		for (i = 0; i < sectors; i++)
 			memset(oob_ptr(chip, i), 0xff, sdg1_oob_len());
 
@@ -716,27 +693,25 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 
 	nfi = &nfc->done;
 
-	start = data_offs / chip->ecc.size;
-	end = DIV_ROUND_UP(data_offs + readlen, chip->ecc.size);
+	start = data_offs / data_len(chip);
+	end = DIV_ROUND_UP(data_offs + readlen, data_len(chip));
 	sectors = end - start;
 
 	spare = mtd->oobsize / chip->ecc.steps;
-	column =  start * (chip->ecc.size + spare);
+	column =  start * (data_len(chip) + spare);
 
-	len = sectors * chip->ecc.size + (raw ? sectors * spare : 0);
-	buf = bufpoi + start * chip->ecc.size;
+	len = sectors * data_len(chip) + (raw ? sectors * spare : 0);
+	buf = bufpoi + start * data_len(chip);
 
 	if (column != 0)
 		chip->cmdfunc(mtd, NAND_CMD_RNDOUT, column, -1);
 
-	/* map the device memory */
 	dma_addr = dma_map_single(nfc->dev, buf, len, DMA_FROM_DEVICE);
 	if (dma_mapping_error(nfc->dev, dma_addr)) {
 		dev_err(nfc->dev, "dma mapping error\n");
 		return -EINVAL;
 	}
 
-	/* configure the transfer  */
 	reg = sdg1_readw(nfc, MTKSDG1_NFI_CNFG);
 	reg |= CNFG_READ_EN | CNFG_DMA_BURST_EN | CNFG_AHB;
 	if (use_ecc) {
@@ -757,7 +732,6 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	init_completion(nfi);
 	reg = sdg1_readl(nfc, MTKSDG1_NFI_CON) | CON_BRD;
 	sdg1_writel(nfc, reg, MTKSDG1_NFI_CON);
-	/* trigger to sample data in CUSTOM_MODE */
 	sdg1_writew(nfc, 1, MTKSDG1_NFI_STRDATA);
 
 	rc = wait_for_completion_timeout(nfi, timeout);
@@ -836,32 +810,23 @@ static int mtk_nfc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 static void mtk_nfc_switch_oob(struct mtd_info *mtd, struct nand_chip *chip,
 					uint8_t *buf)
 {
-	u32 sectors, low, high;
-	u32 *bufpoi, *p;
+	u32 *poi, *oob;
 	size_t spare;
-	int len;
+	u32 sectors;
+	int i;
 
 	spare = mtd->oobsize / chip->ecc.steps;
-	sectors = mtd->writesize / (chip->ecc.size + spare);
+	sectors = mtd->writesize / (data_len(chip) + spare);
 
-	/* MTK: DATA+oob1, DATA+oob2, DATA+oob3; LNX: DATA+OOB */
-	/* point to the last oob_i from the NAND device        */
-	bufpoi = (u32 *)(buf + mtd->writesize - (sectors * spare));
-	len = sdg1_oob_len();
+	poi = (u32 *) (buf + mtd->writesize - sectors * spare);
+	oob = (u32 *) oob_ptr(chip, 0);
 
-	/* copy NAND oob to private area */
-	low = *bufpoi;
-	high = *(bufpoi + 1);
-
-	p = (u32 *)oob_ptr(chip, 0);
-
-	/* copy oob_poi to NAND */
-	*bufpoi = *p;
-	*(bufpoi++) = *(p + 1);
-
-	/* copy NAND oob to oob_poi */
-	*p = low;
-	*(p + 1) = high;
+	/* swap values */
+	for (i = 0; i < sdg1_oob_len() / sizeof(u32); i++) {
+		poi[i] = poi[i] ^ oob[i];
+		oob[i] = poi[i] ^ oob[i];
+		poi[i] = poi[i] ^ oob[i];
+	}
 
 }
 
@@ -963,8 +928,8 @@ static int mtk_nfc_ooblayout_free(struct mtd_info *mtd, int section,
 	if (section)
 		return -ERANGE;
 
-	oobregion->offset = 0;
 	oobregion->length = sdg1_oob_len() * chip->ecc.steps;
+	oobregion->offset = 0;
 
 	return 0;
 }
@@ -978,15 +943,16 @@ static int mtk_nfc_ooblayout_ecc(struct mtd_info *mtd, int section,
 		return -ERANGE;
 
 	mtk_nfc_ooblayout_free(mtd, 0, &free);
+
+	oobregion->length = mtd->oobsize - free.length;
 	oobregion->offset = free.length;
-	oobregion->length = mtd->oobsize - oobregion->offset;
 
 	return 0;
 }
 
 static const struct mtd_ooblayout_ops mtk_nfc_ooblayout_ops = {
-	.ecc = mtk_nfc_ooblayout_ecc,
 	.free = mtk_nfc_ooblayout_free,
+	.ecc = mtk_nfc_ooblayout_ecc,
 };
 
 static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
@@ -997,8 +963,8 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	struct mtd_info *mtd;
 	int nsels, len;
 	int ret;
-	int i;
 	u32 tmp;
+	int i;
 
 	if (!of_get_property(np, "reg", &nsels))
 		return -EINVAL;
@@ -1015,7 +981,6 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 		return -ENOMEM;
 
 	chip->nsels = nsels;
-
 	for (i = 0; i < nsels; i++) {
 		ret = of_property_read_u32_index(np, "reg", i, &tmp);
 		if (ret) {
@@ -1038,16 +1003,18 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	nand->block_markbad = mtk_nfc_block_markbad;
 	nand->dev_ready = mtk_nfc_dev_ready;
 	nand->select_chip = mtk_nfc_select_chip;
+	nand->write_byte = mtk_nfc_write_byte;
 	nand->read_byte = mtk_nfc_read_byte;
 	nand->read_buf = mtk_nfc_read_buf;
-	nand->write_byte = mtk_nfc_write_byte;
 	nand->cmd_ctrl = mtk_nfc_cmd_ctrl;
 	nand->ecc.mode = NAND_ECC_HW;
+
 	nand->ecc.write_subpage = mtk_nfc_write_subpage_hwecc;
 	nand->ecc.write_page_raw = mtk_nfc_write_page_raw;
 	nand->ecc.write_page = mtk_nfc_write_page_hwecc;
 	nand->ecc.write_oob_raw = mtk_nfc_write_oob_raw;
 	nand->ecc.write_oob = mtk_nfc_write_oob;
+
 	nand->ecc.read_subpage = mtk_nfc_read_subpage_hwecc;
 	nand->ecc.read_page_raw = mtk_nfc_read_page_raw;
 	nand->ecc.read_oob_raw = mtk_nfc_read_oob_raw;
@@ -1131,6 +1098,8 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 	nfc->ecc = of_sdg1_ecc_get(np);
 	if (IS_ERR(nfc->ecc))
 		return PTR_ERR(nfc->ecc);
+	else if (!nfc->ecc)
+		return -ENODEV;
 
 	nfc->dev = dev;
 
@@ -1167,7 +1136,7 @@ static int mtk_nfc_probe(struct platform_device *pdev)
 		goto clk_disable;
 	}
 
-	ret = devm_request_irq(dev, irq, mtk_nfc_irq, 0x0, MTK_IRQ_NFI, nfc);
+	ret = devm_request_irq(dev, irq, mtk_nfc_irq, 0x0, "mtk-nand-irq", nfc);
 	if (ret) {
 		dev_err(dev, "failed to request nfi irq\n");
 		goto clk_disable;
