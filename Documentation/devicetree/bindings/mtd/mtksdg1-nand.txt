@@ -1,5 +1,16 @@
 MTK Smart Device SoCs NAND FLASH controller (NFC) DT binding
 
+This file documents the device tree bindings for the Smart Device Gen1
+NAND controllers. The functional split of the controller requires two
+drivers to operate: the nand controller interface driver and the ECC
+controller driver.
+
+The hardware description for both devices must be captured as device
+tree nodes.
+
+1) NFC NAND Controller Interface (NFI):
+=======================================
+
 The first part of NFC is NAND Controller Interface (NFI) HW.
 Required NFI properties:
 - compatible:			Should be "mediatek,mtxxxx-nand".
@@ -91,10 +102,7 @@ NAND chip optional subnodes:
 - Partitions, see Documentation/devicetree/bindings/mtd/partition.txt
 
 Example:
-
 	chip@0 {
-		...
-
 		partitions {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
@@ -110,13 +118,10 @@ Example:
 				reg = <0x00400000 0x12c00000>;
 			};
 		};
-
-		...
-
 	};
 
-BCH ECC Engine HW is another part of NAND FLASH Controller (NFC). It should be
-used with NFI. And its DT properties are as bellow.
+2) ECC Engine:
+==============
 
 Required BCH properties:
 - compatible:	Should be "mediatek,mtxxxx-ecc".

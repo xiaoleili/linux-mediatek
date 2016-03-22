@@ -119,4 +119,3 @@
 #define MTKSDG1_NFI_DELAY_CTRL		(0x248)
 
 #endif
-
