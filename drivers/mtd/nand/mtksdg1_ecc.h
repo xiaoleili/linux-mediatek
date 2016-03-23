@@ -14,19 +14,11 @@
 
 #include <linux/types.h>
 
-struct sdg1_ecc_if;
 struct device_node;
 struct nand_chip;
 struct mtd_info;
+struct sdg1_ecc;
 struct device;
-
-enum sdg1_ecc_ctrl {
-	disable_encoder,
-	disable_decoder,
-	enable_encoder,
-	enable_decoder,
-	start_decoder
-};
 
 /**
  * @len: number of bytes in the data buffer
@@ -39,24 +31,24 @@ struct sdg1_enc_data {
 	u8 *data;
 };
 
-typedef int (*config) (struct sdg1_ecc_if *, struct mtd_info *, unsigned);
-typedef int (*encode)(struct sdg1_ecc_if *, struct sdg1_enc_data *);
-typedef void (*control)(struct sdg1_ecc_if *, enum sdg1_ecc_ctrl, int);
-typedef int (*check)(struct sdg1_ecc_if *, struct mtd_info *, u32);
-typedef void (*release)(struct sdg1_ecc_if *);
-typedef int (*decode)(struct sdg1_ecc_if *);
-typedef void (*init) (struct sdg1_ecc_if *);
-
-struct sdg1_ecc_if {
-	release	release;
-	control control;
-	config config;
-	encode encode;
-	decode decode;
-	check check;
-	init init;
+struct sdg1_ecc_stats {
+	u32 sectors;
+	u32 corrected;
+	u32 bitflips;
+	u32 failed;
 };
 
-struct sdg1_ecc_if *of_sdg1_ecc_get(struct device_node *);
+void sdg1_ecc_enable_decode(struct sdg1_ecc *ecc);
+void sdg1_ecc_disable_decode(struct sdg1_ecc *ecc);
+void sdg1_ecc_start_decode(struct sdg1_ecc *ecc, int sectors);
+int sdg1_ecc_wait_decode(struct sdg1_ecc *ecc);
+void sdg1_ecc_enable_encode(struct sdg1_ecc *ecc);
+void sdg1_ecc_disable_encode(struct sdg1_ecc *ecc);
+int sdg1_ecc_start_encode(struct sdg1_ecc *ecc, struct sdg1_enc_data *d);
+void sdg1_ecc_get_stats(struct sdg1_ecc *ecc, struct sdg1_ecc_stats *stats);
+void sdg1_ecc_hw_init(struct sdg1_ecc *ecc);
+int sdg1_ecc_config(struct sdg1_ecc *ecc, int strength, int step_len);
+void sdg1_ecc_release(struct sdg1_ecc *ecc);
+struct sdg1_ecc *of_sdg1_ecc_get(struct device_node *);
 
 #endif

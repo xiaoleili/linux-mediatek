@@ -26,8 +26,48 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 
-#include "mtksdg1_ecc_regs.h"
 #include "mtksdg1_ecc.h"
+#define MTKSDG1_ECC_ENCCON		(0x00)
+#define		ENC_EN			(1)
+#define		ENC_DE			(0)
+#define MTKSDG1_ECC_ENCCNFG		(0x04)
+#define		ECC_CNFG_4BIT		(0)
+#define		ECC_CNFG_12BIT		(4)
+#define		ECC_CNFG_24BIT		(10)
+#define		ECC_NFI_MODE		BIT(5)
+#define		ECC_DMA_MODE		(0)
+#define		ECC_ENC_MODE_MASK	(0x3 << 5)
+#define		ECC_MS_SHIFT		(16)
+#define MTKSDG1_ECC_ENCDIADDR		(0x08)
+#define MTKSDG1_ECC_ENCIDLE		(0x0C)
+#define		ENC_IDLE		BIT(0)
+#define MTKSDG1_ECC_ENCPAR0		(0x10)
+#define MTKSDG1_ECC_ENCSTA		(0x7C)
+#define MTKSDG1_ECC_ENCIRQ_EN		(0x80)
+#define		ENC_IRQEN		BIT(0)
+#define MTKSDG1_ECC_ENCIRQ_STA		(0x84)
+#define MTKSDG1_ECC_DECCON		(0x100)
+#define		DEC_EN			(1)
+#define		DEC_DE			(0)
+#define MTKSDG1_ECC_DECCNFG		(0x104)
+#define		DEC_EMPTY_EN		BIT(31)
+#define		DEC_CNFG_FER		(0x1 << 12)
+#define		DEC_CNFG_EL		(0x2 << 12)
+#define		DEC_CNFG_CORRECT	(0x3 << 12)
+#define MTKSDG1_ECC_DECIDLE		(0x10C)
+#define		DEC_IDLE		BIT(0)
+#define MTKSDG1_ECC_DECFER		(0x110)
+#define MTKSDG1_ECC_DECENUM0		(0x114)
+#define		ERR_MASK		(0x3f)
+#define MTKSDG1_ECC_DECDONE		(0x124)
+#define MTKSDG1_ECC_DECEL0		(0x128)
+#define MTKSDG1_ECC_DECIRQ_EN		(0x200)
+#define		DEC_IRQEN		BIT(0)
+#define MTKSDG1_ECC_DECIRQ_STA		(0x204)
+#define MTKSDG1_ECC_DECFSM		(0x208)
+#define		DECFSM_MASK		(0x7f0f0f0f)
+#define		DECFSM_IDLE		(0x01010101)
+
 
 #define ECC_TIMEOUT		(500000)
 #define MTK_ECC_PARITY_BITS	(14)
@@ -45,8 +85,6 @@ struct sdg1_ecc {
 
 	struct completion done;
 	u32 sec_mask;
-
-	struct sdg1_ecc_if intf;
 
 #ifdef CONFIG_PM_SLEEP
 	struct sdg1_pm_regs pm_regs;
@@ -104,41 +142,41 @@ static irqreturn_t sdg1_ecc_irq(int irq, void *id)
 	return IRQ_HANDLED;
 }
 
-
-static int sdg1_ecc_check(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd,
-			u32 sectors)
+void sdg1_ecc_get_stats(struct sdg1_ecc *ecc, struct sdg1_ecc_stats *stats)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	u32 offset, i, err;
 	u32 bitflips = 0;
 
-	for (i = 0; i < sectors; i++) {
+	stats->corrected = 0;
+	stats->failed = 0;
+
+	for (i = 0; i < stats->sectors; i++) {
 		offset = (i >> 2) << 2;
 		err = readl(ecc->regs + MTKSDG1_ECC_DECENUM0 + offset);
 		err = err >> ((i % 4) * 8);
 		err &= ERR_MASK;
 		if (err == ERR_MASK) {
 			/* uncorrectable errors */
-			mtd->ecc_stats.failed++;
+			stats->failed++;
 			continue;
 		}
 
-		mtd->ecc_stats.corrected += err;
+		stats->corrected += err;
 		bitflips = max_t(u32, bitflips, err);
 	}
 
-	return bitflips;
+	stats->bitflips = bitflips;
 }
+EXPORT_SYMBOL(sdg1_ecc_get_stats);
 
-static void sdg1_ecc_release(struct sdg1_ecc_if *ecc_if)
+void sdg1_ecc_release(struct sdg1_ecc *ecc)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
-
 	clk_disable_unprepare(ecc->clk);
 	put_device(ecc->dev);
 }
+EXPORT_SYMBOL(sdg1_ecc_release);
 
-static struct sdg1_ecc_if *sdg1_ecc_get(struct device_node *np)
+static struct sdg1_ecc *sdg1_ecc_get(struct device_node *np)
 {
 	struct platform_device *pdev;
 	struct sdg1_ecc *ecc;
@@ -151,63 +189,65 @@ static struct sdg1_ecc_if *sdg1_ecc_get(struct device_node *np)
 	ecc = platform_get_drvdata(pdev);
 
 	clk_prepare_enable(ecc->clk);
-	ecc->dev = &pdev->dev;
 
-	return &ecc->intf;
+	return ecc;
 }
 
-struct sdg1_ecc_if *of_sdg1_ecc_get(struct device_node *of_node)
+struct sdg1_ecc *of_sdg1_ecc_get(struct device_node *of_node)
 {
-	struct sdg1_ecc_if *ecc_if = NULL;
+	struct sdg1_ecc *ecc = NULL;
 	struct device_node *np;
 
 	np = of_parse_phandle(of_node, "mediatek,ecc-controller", 0);
 	if (np) {
-		ecc_if = sdg1_ecc_get(np);
+		ecc = sdg1_ecc_get(np);
 		of_node_put(np);
 	}
 
-	return ecc_if;
+	return ecc;
 }
 EXPORT_SYMBOL(of_sdg1_ecc_get);
 
-static void sdg1_ecc_control(struct sdg1_ecc_if *ecc_if,
-				enum sdg1_ecc_ctrl ctrl, int arg)
+void sdg1_ecc_enable_encode(struct sdg1_ecc *ecc)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
-	int sectors;
-
-	switch (ctrl) {
-	case enable_encoder:
-		sdg1_ecc_encoder_idle(ecc);
-		writew(ENC_EN, ecc->regs + MTKSDG1_ECC_ENCCON);
-		break;
-	case disable_encoder:
-		writew(0, ecc->regs + MTKSDG1_ECC_ENCIRQ_EN);
-		sdg1_ecc_encoder_idle(ecc);
-		writew(ENC_DE, ecc->regs + MTKSDG1_ECC_ENCCON);
-		break;
-	case enable_decoder:
-		sdg1_ecc_decoder_idle(ecc);
-		writel(DEC_EN, ecc->regs + MTKSDG1_ECC_DECCON);
-		break;
-	case disable_decoder:
-		writew(0, ecc->regs + MTKSDG1_ECC_DECIRQ_EN);
-		sdg1_ecc_decoder_idle(ecc);
-		writel(DEC_DE, ecc->regs + MTKSDG1_ECC_DECCON);
-		break;
-	case start_decoder:
-		sectors = arg;
-		ecc->sec_mask = 1 << (sectors - 1);
-		init_completion(&ecc->done);
-		writew(DEC_IRQEN, ecc->regs + MTKSDG1_ECC_DECIRQ_EN);
-		break;
-	}
+	sdg1_ecc_encoder_idle(ecc);
+	writew(ENC_EN, ecc->regs + MTKSDG1_ECC_ENCCON);
 }
+EXPORT_SYMBOL(sdg1_ecc_enable_encode);
 
-static int sdg1_ecc_decode(struct sdg1_ecc_if *ecc_if)
+void sdg1_ecc_disable_encode(struct sdg1_ecc *ecc)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
+	writew(0, ecc->regs + MTKSDG1_ECC_ENCIRQ_EN);
+	sdg1_ecc_encoder_idle(ecc);
+	writew(ENC_DE, ecc->regs + MTKSDG1_ECC_ENCCON);
+}
+EXPORT_SYMBOL(sdg1_ecc_disable_encode);
+
+void sdg1_ecc_enable_decode(struct sdg1_ecc *ecc)
+{
+	sdg1_ecc_decoder_idle(ecc);
+	writel(DEC_EN, ecc->regs + MTKSDG1_ECC_DECCON);
+}
+EXPORT_SYMBOL(sdg1_ecc_enable_decode);
+
+void sdg1_ecc_disable_decode(struct sdg1_ecc *ecc)
+{
+	writew(0, ecc->regs + MTKSDG1_ECC_DECIRQ_EN);
+	sdg1_ecc_decoder_idle(ecc);
+	writel(DEC_DE, ecc->regs + MTKSDG1_ECC_DECCON);
+}
+EXPORT_SYMBOL(sdg1_ecc_disable_decode);
+
+void sdg1_ecc_start_decode(struct sdg1_ecc *ecc, int sectors)
+{
+	ecc->sec_mask = 1 << (sectors - 1);
+	init_completion(&ecc->done);
+	writew(DEC_IRQEN, ecc->regs + MTKSDG1_ECC_DECIRQ_EN);
+}
+EXPORT_SYMBOL(sdg1_ecc_start_decode);
+
+int sdg1_ecc_wait_decode(struct sdg1_ecc *ecc)
+{
 	int ret;
 
 	ret = wait_for_completion_timeout(&ecc->done, msecs_to_jiffies(500));
@@ -218,10 +258,10 @@ static int sdg1_ecc_decode(struct sdg1_ecc_if *ecc_if)
 
 	return 0;
 }
+EXPORT_SYMBOL(sdg1_ecc_wait_decode);
 
-static int sdg1_ecc_encode(struct sdg1_ecc_if *ecc_if, struct sdg1_enc_data *d)
+int sdg1_ecc_start_encode(struct sdg1_ecc *ecc, struct sdg1_enc_data *d)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
 	dma_addr_t addr;
 	u32 *p, len;
 	u32 reg, i;
@@ -274,27 +314,24 @@ timeout:
 
 	return ret;
 }
+EXPORT_SYMBOL(sdg1_ecc_start_encode);
 
-static void sdg1_ecc_hw_init(struct sdg1_ecc_if *ecc_if)
+void sdg1_ecc_hw_init(struct sdg1_ecc *ecc)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
-
 	sdg1_ecc_encoder_idle(ecc);
 	writew(ENC_DE, ecc->regs + MTKSDG1_ECC_ENCCON);
 
 	sdg1_ecc_decoder_idle(ecc);
 	writel(DEC_DE, ecc->regs + MTKSDG1_ECC_DECCON);
 }
+EXPORT_SYMBOL(sdg1_ecc_hw_init);
 
-static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd,
-				unsigned len)
+int sdg1_ecc_config(struct sdg1_ecc *ecc, int strength, int step_len)
 {
-	struct sdg1_ecc *ecc = container_of(ecc_if, struct sdg1_ecc, intf);
-	struct nand_chip *chip = mtd_to_nand(mtd);
 	u32 ecc_bit, dec_sz, enc_sz;
 	u32 reg;
 
-	switch (chip->ecc.strength) {
+	switch (strength) {
 	case 4:
 		ecc_bit = ECC_CNFG_4BIT;
 		break;
@@ -310,18 +347,19 @@ static int sdg1_ecc_config(struct sdg1_ecc_if *ecc_if, struct mtd_info *mtd,
 	}
 
 	/* configure ECC encoder (in bits) */
-	enc_sz = len << 3;
+	enc_sz = step_len << 3;
 	reg = ecc_bit | ECC_NFI_MODE | (enc_sz << ECC_MS_SHIFT);
 	writel(reg, ecc->regs + MTKSDG1_ECC_ENCCNFG);
 
 	/* configure ECC decoder (in bits) */
-	dec_sz = enc_sz + chip->ecc.strength * MTK_ECC_PARITY_BITS;
+	dec_sz = enc_sz + strength * MTK_ECC_PARITY_BITS;
 	reg = ecc_bit | ECC_NFI_MODE | (dec_sz << ECC_MS_SHIFT);
 	reg |= DEC_CNFG_CORRECT | DEC_EMPTY_EN;
 	writel(reg, ecc->regs + MTKSDG1_ECC_DECCNFG);
 
 	return 0;
 }
+EXPORT_SYMBOL(sdg1_ecc_config);
 
 static int sdg1_ecc_probe(struct platform_device *pdev)
 {
@@ -368,14 +406,6 @@ static int sdg1_ecc_probe(struct platform_device *pdev)
 	mutex_init(&ecc->lock);
 
 	ecc->dev = dev;
-
-	ecc->intf.control = sdg1_ecc_control;
-	ecc->intf.release = sdg1_ecc_release;
-	ecc->intf.config = sdg1_ecc_config;
-	ecc->intf.decode = sdg1_ecc_decode;
-	ecc->intf.encode = sdg1_ecc_encode;
-	ecc->intf.init = sdg1_ecc_hw_init;
-	ecc->intf.check = sdg1_ecc_check;
 
 	platform_set_drvdata(pdev, ecc);
 
