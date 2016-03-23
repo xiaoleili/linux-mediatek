@@ -1,9 +1,8 @@
-MTK Smart Device SoCs NAND FLASH controller (NFC) DT binding
+MTK SoCs NAND FLASH controller (NFC) DT binding
 
-This file documents the device tree bindings for the Smart Device Gen1
-NAND controllers. The functional split of the controller requires two
-drivers to operate: the nand controller interface driver and the ECC
-controller driver.
+This file documents the device tree bindings for MTK SoCs NAND controllers.
+The functional split of the controller requires two drivers to operate: 
+the nand controller interface driver and the ECC engine driver.
 
 The hardware description for both devices must be captured as device
 tree nodes.
@@ -25,7 +24,7 @@ Required NFI properties:
 
 Example:
 
-	nand: nfi@1100d000 {
+	nandc: nfi@1100d000 {
 		compatible = "mediatek,mt2701-nfc";
 		reg = <0 0x1100d000 0 0x1000>;
 		interrupts = <GIC_SPI 56 IRQ_TYPE_LEVEL_LOW>;
@@ -86,7 +85,7 @@ Example:
 		};
 	};
 
-	&nand {
+	&nandc {
 		status = "okay";
 		pinctrl-names = "default";
 		pinctrl-0 = <&nand_pins_default>;
