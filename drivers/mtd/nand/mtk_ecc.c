@@ -59,7 +59,7 @@
 #define ECC_DECIRQ_STA		(0x204)
 
 #define ECC_TIMEOUT		(500000)
-#define ECC_PARITY_BITS	(14)
+#define ECC_PARITY_BITS		(14)
 
 struct mtk_ecc {
 	struct device *dev;

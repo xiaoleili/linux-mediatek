@@ -17,14 +17,13 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
-#include <linux/of_mtd.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
-#include <linux/mtd/partitions.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/mtd.h>
 #include <linux/module.h>
 #include <linux/iopoll.h>
+#include <linux/of.h>
 
 #include "mtk_ecc.h"
 
@@ -68,8 +67,8 @@
 #define NFI_COLADDR		(0x34)
 #define NFI_ROWADDR		(0x38)
 #define NFI_STRDATA		(0x40)
-#define		STAR_EN		(1)
-#define		STAR_DE		(0)
+#define		STAR_EN			(1)
+#define		STAR_DE			(0)
 #define NFI_CNRNB		(0x44)
 #define NFI_DATAW		(0x50)
 #define NFI_DATAR		(0x54)

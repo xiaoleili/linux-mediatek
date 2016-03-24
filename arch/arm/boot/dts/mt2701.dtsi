@@ -216,7 +216,6 @@
 		clocks = <&pericfg CLK_PERI_NFI>,
 			 <&pericfg CLK_PERI_NFI_PAD>;
 		clock-names = "nfi_clk", "pad_clk";
-		nand-on-flash-bbt;
 		status = "disabled";
 		mediatek,ecc-controller = <&bch>;
 		#address-cells = <1>;

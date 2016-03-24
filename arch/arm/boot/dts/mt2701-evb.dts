@@ -66,6 +66,7 @@
 	chip@0 {
 		reg = <0>;
 		spare_per_sector = <56>;
+		nand-on-flash-bbt;
 		nand-ecc-strength = <24>;
 		nand-ecc-step-size = <1024>;
 		partitions {

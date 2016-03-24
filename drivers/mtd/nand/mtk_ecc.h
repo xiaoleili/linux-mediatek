@@ -15,10 +15,7 @@
 #include <linux/types.h>
 
 struct device_node;
-struct nand_chip;
-struct mtd_info;
 struct mtk_ecc;
-struct device;
 
 /**
  * @len: number of bytes in the data buffer
