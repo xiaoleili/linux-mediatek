@@ -1,7 +1,7 @@
 MTK SoCs NAND FLASH controller (NFC) DT binding
 
 This file documents the device tree bindings for MTK SoCs NAND controllers.
-The functional split of the controller requires two drivers to operate: 
+The functional split of the controller requires two drivers to operate:
 the nand controller interface driver and the ECC engine driver.
 
 The hardware description for both devices must be captured as device
@@ -12,7 +12,7 @@ tree nodes.
 
 The first part of NFC is NAND Controller Interface (NFI) HW.
 Required NFI properties:
-- compatible:			Should be "mediatek,mtxxxx-nand".
+- compatible:			Should be "mediatek,mtxxxx-nfc".
 - reg:				Base physical address and size of NFI.
 - interrupts:			Interrupts of NFI.
 - clocks:			NFI required clocks.
@@ -89,7 +89,7 @@ Example:
 		status = "okay";
 		pinctrl-names = "default";
 		pinctrl-0 = <&nand_pins_default>;
-		chip@0 {
+		nand@0 {
 			reg = <0>;
 			spare_per_sector = <56>;
 			nand-ecc-strength = <24>;
@@ -101,7 +101,7 @@ NAND chip optional subnodes:
 - Partitions, see Documentation/devicetree/bindings/mtd/partition.txt
 
 Example:
-	chip@0 {
+	nand@0 {
 		partitions {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;

@@ -112,7 +112,6 @@ struct mtk_nfc_nand_chip {
 	struct list_head node;
 	struct nand_chip nand;
 	u32 spare_per_sector;
-	u32 sparesize;
 	int nsels;
 	u8 sels[0];
 };
@@ -169,7 +168,6 @@ static inline uint8_t *mtk_oob_ptr(struct nand_chip *chip, int i)
 
 static inline int mtk_step_len(struct nand_chip *chip)
 {
-	/* CRC protected per step */
 	return chip->ecc.size + NFI_FDM_REG_SIZE;
 }
 
@@ -265,6 +263,7 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	u32 fmt, spare = mtk_nand->spare_per_sector;
+	struct mtk_ecc_config config;
 
 	/* skip configuration when recognize NAND Flash */
 	if (!mtd->writesize)
@@ -305,7 +304,9 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 	fmt |= NFI_FDM_REG_SIZE << PAGEFMT_FDM_ECC_SHIFT;
 	nfi_writew(nfc, fmt, NFI_PAGEFMT);
 
-	mtk_ecc_config(nfc->ecc, chip->ecc.strength, mtk_step_len(chip));
+	config.step_len = mtk_step_len(chip);
+	config.strength = chip->ecc.strength;
+	mtk_ecc_config(nfc->ecc, &config);
 
 	return 0;
 }
@@ -373,13 +374,14 @@ static inline uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 
 		reg = (MTK_MAX_SECTOR << CON_SEC_SHIFT) | CON_BRD;
 		nfi_writel(nfc, reg, NFI_CON);
-		/* trigger to featch data */
+
+		/* trigger to fetch data */
 		nfi_writew(nfc, STAR_EN, NFI_STRDATA);
-		/* I found the first byte data may be wrong after trigger,
-		 * if there is no wait here. It is related with HW.
-		 * Controller will fetch data till the internal FIFO full at
-		 * the beginning.
-		*/
+
+		/* hardware issue work around:
+		 * The first byte of data may be wrong right after the trigger.
+		 * (The controller fetches data until the internal FIFO is full)
+		 */
 		udelay(10);
 	}
 
@@ -417,8 +419,7 @@ static void mtk_nfc_write_byte(struct mtd_info *mtd, uint8_t byte)
 	nfi_writeb(nfc, byte, NFI_DATAW);
 }
 
-static void mtk_nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf,
-				int len)
+static void mtk_nfc_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 {
 	int i;
 
@@ -443,14 +444,13 @@ static int mtk_nfc_format_subpage(struct mtd_info *mtd, uint32_t offset,
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	u32 start, end;
 	int i, ret;
 
 	start = offset / chip->ecc.size;
 	end = DIV_ROUND_UP(offset + len, chip->ecc.size);
 
-	memset(nfc->buffer, 0xff, mtd->writesize + mtk_nand->sparesize);
+	memset(nfc->buffer, 0xff, mtd->writesize + mtd->oobsize);
 	for (i = 0; i < chip->ecc.steps; i++) {
 
 		memcpy(mtk_data_ptr(chip, i), data_ptr(chip, buf, i),
@@ -477,10 +477,9 @@ static void mtk_nfc_format_page(struct mtd_info *mtd, const uint8_t *buf,
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	u32 i;
 
-	memset(nfc->buffer, 0xff, mtd->writesize + mtk_nand->sparesize);
+	memset(nfc->buffer, 0xff, mtd->writesize + mtd->oobsize);
 	for (i = 0; i < chip->ecc.steps; i++) {
 		if (buf)
 			memcpy(mtk_data_ptr(chip, i), data_ptr(chip, buf, i),
@@ -572,7 +571,6 @@ static int mtk_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 			const uint8_t *buf, int oob_on, int page, int raw)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	size_t len;
 	u32 reg;
 	int ret;
@@ -589,7 +587,7 @@ static int mtk_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 			mtk_nfc_write_fdm(chip);
 	}
 
-	len = mtd->writesize + (raw ? mtk_nand->sparesize : 0);
+	len = mtd->writesize + (raw ? mtd->oobsize : 0);
 	ret = mtk_nfc_do_write_page(mtd, chip, buf, page, len);
 
 	if (!raw)
@@ -669,7 +667,7 @@ static int mtk_nfc_update_oob(struct mtd_info *mtd, struct nand_chip *chip,
 				u8 *buf, u32 sectors)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	struct mtk_ecc_stats stats = { .sectors = sectors };
+	struct mtk_ecc_stats stats;
 	int rc, i;
 
 	rc = nfi_readl(nfc, NFI_STA) & STA_EMP_PAGE;
@@ -684,7 +682,7 @@ static int mtk_nfc_update_oob(struct mtd_info *mtd, struct nand_chip *chip,
 
 	mtk_nfc_read_fdm(chip, sectors);
 
-	mtk_ecc_get_stats(nfc->ecc, &stats);
+	mtk_ecc_get_stats(nfc->ecc, &stats, sectors);
 	mtd->ecc_stats.corrected += stats.corrected;
 	mtd->ecc_stats.failed += stats.failed;
 
@@ -694,11 +692,10 @@ static int mtk_nfc_update_oob(struct mtd_info *mtd, struct nand_chip *chip,
 static int mtk_nfc_block_markbad(struct mtd_info *mtd, loff_t ofs)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	u8 *buf = chip->buffers->databuf;
 	int page, rc, i;
 
-	memset(buf, 0x00, mtd->writesize + mtk_nand->sparesize);
+	memset(buf, 0x00, mtd->writesize + mtd->oobsize);
 
 	if (chip->bbt_options & NAND_BBT_SCANLASTPAGE)
 		ofs += mtd->erasesize - mtd->writesize;
@@ -732,7 +729,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	u32 column, sectors, start, end, reg;
-	u32 spare = mtk_nand->sparesize;
+	u32 spare = mtk_nand->spare_per_sector;
 	dma_addr_t addr;
 	int bitflips;
 	size_t len;
@@ -824,10 +821,9 @@ static int mtk_nfc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 				uint8_t *buf, int oob_on, int page)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	int i, ret;
 
-	memset(nfc->buffer, 0xff, mtd->writesize + mtk_nand->sparesize);
+	memset(nfc->buffer, 0xff, mtd->writesize + mtd->oobsize);
 	ret = mtk_nfc_read_subpage(mtd, chip, 0, mtd->writesize, nfc->buffer,
 					page, 1);
 	if (ret < 0)
@@ -848,7 +844,6 @@ static int mtk_nfc_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 static int mtk_nfc_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 				int page)
 {
-	struct mtk_nfc *nfc = nand_get_controller_data(chip);
 	u8 *buf = chip->buffers->databuf;
 	struct mtd_ecc_stats stats;
 	int ret;
@@ -951,8 +946,6 @@ static int mtk_nfc_ooblayout_free(struct mtd_info *mtd, int section,
 static int mtk_nfc_ooblayout_ecc(struct mtd_info *mtd, int section,
 				struct mtd_oob_region *oob_region)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	struct mtd_oob_region free_region;
 
 	if (section)
@@ -960,7 +953,7 @@ static int mtk_nfc_ooblayout_ecc(struct mtd_info *mtd, int section,
 
 	mtk_nfc_ooblayout_free(mtd, 0, &free_region);
 
-	oob_region->length = mtk_nand->sparesize - free_region.length;
+	oob_region->length = mtd->oobsize - free_region.length;
 	oob_region->offset = free_region.length;
 
 	return 0;
@@ -983,7 +976,7 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	int i;
 
 	if (!of_get_property(np, "reg", &nsels))
-		return -EINVAL;
+		return -ENODEV;
 
 	nsels /= sizeof(u32);
 	if (!nsels || nsels > MTK_NAND_MAX_NSELS) {
@@ -1006,7 +999,12 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 		chip->sels[i] = tmp;
 	}
 
-	of_property_read_u32(np, "spare_per_sector", &chip->spare_per_sector);
+	if (of_property_read_u32(np, "spare_per_sector",
+						&chip->spare_per_sector)) {
+		dev_err(dev, "missing spare_per_sector property in DT\n");
+		return -ENODEV;
+
+	}
 
 	nand = &chip->nand;
 	nand->controller = &nfc->controller;
@@ -1049,18 +1047,14 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	if (ret)
 		return -ENODEV;
 
-	/* set mtk sparesize */
-	tmp = chip->spare_per_sector;
-	chip->sparesize = tmp * (mtd->writesize / nand->ecc.size);
-
-	len = mtd->writesize + chip->sparesize;
-	nfc->buffer = devm_kzalloc(dev, len, GFP_KERNEL);
-	if (!nfc->buffer)
-		return  -ENOMEM;
-
 	ret = nand_scan_tail(mtd);
 	if (ret)
 		return -ENODEV;
+
+	len = mtd->writesize + mtd->oobsize;
+	nfc->buffer = devm_kzalloc(dev, len, GFP_KERNEL);
+	if (!nfc->buffer)
+		return  -ENOMEM;
 
 	ret = mtd_device_parse_register(mtd, NULL, NULL, NULL, 0);
 	if (ret) {

@@ -121,7 +121,8 @@ static irqreturn_t mtk_ecc_irq(int irq, void *id)
 	return IRQ_HANDLED;
 }
 
-void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats)
+void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats,
+			int sectors)
 {
 	u32 offset, i, err;
 	u32 bitflips = 0;
@@ -129,7 +130,7 @@ void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats)
 	stats->corrected = 0;
 	stats->failed = 0;
 
-	for (i = 0; i < stats->sectors; i++) {
+	for (i = 0; i < sectors; i++) {
 		offset = (i >> 2) << 2;
 		err = readl(ecc->regs + ECC_DECENUM0 + offset);
 		err = err >> ((i % 4) * 8);
@@ -166,9 +167,7 @@ static struct mtk_ecc *mtk_ecc_get(struct device_node *np)
 
 	get_device(&pdev->dev);
 	ecc = platform_get_drvdata(pdev);
-
 	clk_prepare_enable(ecc->clk);
-
 	mtk_ecc_hw_init(ecc);
 
 	return ecc;
@@ -306,12 +305,12 @@ void mtk_ecc_hw_init(struct mtk_ecc *ecc)
 	writel(DEC_DE, ecc->regs + ECC_DECCON);
 }
 
-int mtk_ecc_config(struct mtk_ecc *ecc, int strength, int step_len)
+int mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
 	u32 ecc_bit, dec_sz, enc_sz;
 	u32 reg;
 
-	switch (strength) {
+	switch (config->strength) {
 	case 4:
 		ecc_bit = ECC_CNFG_4BIT;
 		break;
@@ -327,12 +326,12 @@ int mtk_ecc_config(struct mtk_ecc *ecc, int strength, int step_len)
 	}
 
 	/* configure ECC encoder (in bits) */
-	enc_sz = step_len << 3;
+	enc_sz = config->step_len << 3;
 	reg = ecc_bit | ECC_NFI_MODE | (enc_sz << ECC_MS_SHIFT);
 	writel(reg, ecc->regs + ECC_ENCCNFG);
 
 	/* configure ECC decoder (in bits) */
-	dec_sz = enc_sz + strength * ECC_PARITY_BITS;
+	dec_sz = enc_sz + config->strength * ECC_PARITY_BITS;
 	reg = ecc_bit | ECC_NFI_MODE | (dec_sz << ECC_MS_SHIFT);
 	reg |= DEC_CNFG_CORRECT | DEC_EMPTY_EN;
 	writel(reg, ecc->regs + ECC_DECCNFG);

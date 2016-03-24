@@ -32,23 +32,28 @@ struct mtk_ecc_enc_data {
 };
 
 struct mtk_ecc_stats {
-	u32 sectors;
 	u32 corrected;
 	u32 bitflips;
 	u32 failed;
 };
 
-void mtk_ecc_enable_decode(struct mtk_ecc *ecc);
-void mtk_ecc_disable_decode(struct mtk_ecc *ecc);
-void mtk_ecc_start_decode(struct mtk_ecc *ecc, int sectors);
-int mtk_ecc_wait_decode(struct mtk_ecc *ecc);
-void mtk_ecc_enable_encode(struct mtk_ecc *ecc);
-void mtk_ecc_disable_encode(struct mtk_ecc *ecc);
-int mtk_ecc_start_encode(struct mtk_ecc *ecc, struct mtk_ecc_enc_data *d);
-void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats);
-void mtk_ecc_hw_init(struct mtk_ecc *ecc);
-int mtk_ecc_config(struct mtk_ecc *ecc, int strength, int step_len);
-void mtk_ecc_release(struct mtk_ecc *ecc);
+struct mtk_ecc_config {
+	u32 strength;
+	u32 step_len;
+};
+
+void mtk_ecc_enable_decode(struct mtk_ecc *);
+void mtk_ecc_disable_decode(struct mtk_ecc *);
+
+int mtk_ecc_wait_decode(struct mtk_ecc *);
+void mtk_ecc_enable_encode(struct mtk_ecc *);
+void mtk_ecc_disable_encode(struct mtk_ecc *);
+int mtk_ecc_start_encode(struct mtk_ecc *, struct mtk_ecc_enc_data *);
+void mtk_ecc_hw_init(struct mtk_ecc *);
+int mtk_ecc_config(struct mtk_ecc *, struct mtk_ecc_config *);
+void mtk_ecc_release(struct mtk_ecc *);
 struct mtk_ecc *of_mtk_ecc_get(struct device_node *);
 
+void mtk_ecc_start_decode(struct mtk_ecc *, int sectors);
+void mtk_ecc_get_stats(struct mtk_ecc *, struct mtk_ecc_stats *, int sectors);
 #endif
