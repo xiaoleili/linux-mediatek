@@ -18,7 +18,7 @@ Required NFI properties:
 - clocks:			NFI required clocks.
 - clock-names:			NFI clocks internal name.
 - status:			Disabled default. Then set "okay" by platform.
-- mediatek,ecc-controller:	Required ECC Engine node.
+- ecc-engine:			Required ECC Engine node.
 - #address-cells:		NAND chip index, should be 1.
 - #size-cells:			Should be 0.
 
@@ -32,7 +32,7 @@ Example:
 			 <&pericfg CLK_PERI_NFI_PAD>;
 		clock-names = "nfi_clk", "pad_clk";
 		status = "disabled";
-		mediatek,ecc-controller = <&bch>;
+		ecc-engine = <&bch>;
 		#address-cells = <1>;
 		#size-cells = <0>;
         };
