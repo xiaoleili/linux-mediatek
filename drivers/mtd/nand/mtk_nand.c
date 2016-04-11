@@ -1020,7 +1020,6 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	nand->read_byte = mtk_nfc_read_byte;
 	nand->read_buf = mtk_nfc_read_buf;
 	nand->cmd_ctrl = mtk_nfc_cmd_ctrl;
-	nand->ecc.mode = NAND_ECC_HW;
 
 	nand->ecc.write_subpage = mtk_nfc_write_subpage_hwecc;
 	nand->ecc.write_page_raw = mtk_nfc_write_page_raw;
@@ -1045,6 +1044,11 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	ret = nand_scan_ident(mtd, nsels, NULL);
 	if (ret)
 		return -ENODEV;
+
+	if (nand->ecc.mode != NAND_ECC_HW) {
+		dev_err(dev, "ecc mode is not NAND_ECC_HW\n");
+		return -ENODEV;
+	}
 
 	ret = nand_scan_tail(mtd);
 	if (ret)

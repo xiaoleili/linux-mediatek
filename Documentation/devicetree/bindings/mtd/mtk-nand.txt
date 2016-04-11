@@ -45,6 +45,7 @@ Children nodes properties:
 			Set as reg = <0>, <1> when need 2 CS.
 - spare_per_sector:	Spare size of each sector.
 - nand-on-flash-bbt:	Storge BBT on NAND Flash.
+- nand-ecc-mode:	NAND ecc mode, must be "hw".
 - nand-ecc-strength:	Number of bits to correct per ECC step.
 - nand-ecc-step-size:	Number of data bytes covered by a single ECC step.
 
@@ -93,6 +94,7 @@ Example:
 			reg = <0>;
 			spare_per_sector = <56>;
 			nand-on-flash-bbt;
+			nand-ecc-mode = "hw";
 			nand-ecc-strength = <24>;
 			nand-ecc-step-size = <1024>;
 		};
