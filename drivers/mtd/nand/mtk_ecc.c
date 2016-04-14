@@ -30,8 +30,25 @@
 #define		ENC_DE			(0)
 #define ECC_ENCCNFG		(0x04)
 #define		ECC_CNFG_4BIT		(0)
+#define		ECC_CNFG_6BIT		(1)
+#define		ECC_CNFG_8BIT		(2)
+#define		ECC_CNFG_10BIT		(3)
 #define		ECC_CNFG_12BIT		(4)
-#define		ECC_CNFG_24BIT		(10)
+#define		ECC_CNFG_14BIT		(5)
+#define		ECC_CNFG_16BIT		(6)
+#define		ECC_CNFG_18BIT		(7)
+#define		ECC_CNFG_20BIT		(8)
+#define		ECC_CNFG_22BIT		(9)
+#define		ECC_CNFG_24BIT		(0xa)
+#define		ECC_CNFG_28BIT		(0xb)
+#define		ECC_CNFG_32BIT		(0xc)
+#define		ECC_CNFG_36BIT		(0xd)
+#define		ECC_CNFG_40BIT		(0xe)
+#define		ECC_CNFG_44BIT		(0xf)
+#define		ECC_CNFG_48BIT		(0x10)
+#define		ECC_CNFG_52BIT		(0x11)
+#define		ECC_CNFG_56BIT		(0x12)
+#define		ECC_CNFG_60BIT		(0x13)
 #define		ECC_NFI_MODE		BIT(5)
 #define		ECC_DMA_MODE		(0)
 #define		ECC_ENC_MODE_MASK	(0x3 << 5)
@@ -314,14 +331,65 @@ int mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 	case 4:
 		ecc_bit = ECC_CNFG_4BIT;
 		break;
+	case 6:
+		ecc_bit = ECC_CNFG_6BIT;
+		break;
+	case 8:
+		ecc_bit = ECC_CNFG_8BIT;
+		break;
+	case 10:
+		ecc_bit = ECC_CNFG_10BIT;
+		break;
 	case 12:
 		ecc_bit = ECC_CNFG_12BIT;
+		break;
+	case 14:
+		ecc_bit = ECC_CNFG_14BIT;
+		break;
+	case 16:
+		ecc_bit = ECC_CNFG_16BIT;
+		break;
+	case 18:
+		ecc_bit = ECC_CNFG_18BIT;
+		break;
+	case 20:
+		ecc_bit = ECC_CNFG_20BIT;
+		break;
+	case 22:
+		ecc_bit = ECC_CNFG_22BIT;
 		break;
 	case 24:
 		ecc_bit = ECC_CNFG_24BIT;
 		break;
+	case 28:
+		ecc_bit = ECC_CNFG_28BIT;
+		break;
+	case 32:
+		ecc_bit = ECC_CNFG_32BIT;
+		break;
+	case 36:
+		ecc_bit = ECC_CNFG_36BIT;
+		break;
+	case 40:
+		ecc_bit = ECC_CNFG_40BIT;
+		break;
+	case 44:
+		ecc_bit = ECC_CNFG_44BIT;
+		break;
+	case 48:
+		ecc_bit = ECC_CNFG_48BIT;
+		break;
+	case 52:
+		ecc_bit = ECC_CNFG_52BIT;
+		break;
+	case 56:
+		ecc_bit = ECC_CNFG_56BIT;
+		break;
+	case 60:
+		ecc_bit = ECC_CNFG_60BIT;
+		break;
 	default:
-		dev_err(ecc->dev, "invalid spare len per sector\n");
+		dev_err(ecc->dev, "invalid ecc strength %d\n", config->strength);
 		return -EINVAL;
 	}
 
@@ -339,6 +407,37 @@ int mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 	return 0;
 }
 EXPORT_SYMBOL(mtk_ecc_config);
+
+void mtk_ecc_strength_convert(u32 *eccstrength)
+{
+	u32 ecc[] = {4, 6, 8, 10, 12, 14, 16, 18,
+			20, 22, 24, 28, 32, 36,
+			40, 44, 48, 52, 56, 60};
+	int i = 0, j = sizeof(ecc) / sizeof(u32) - 1, tmp = *eccstrength;
+	int k, delta[2];
+
+	delta[0] = ecc[0];
+	delta[1] = tmp - ecc[0];
+
+	while (i <= j) {
+		k = (j + i) / 2;
+		if (tmp < ecc[k]) {
+			j = k - 1;
+		} else if (tmp > ecc[k]) {
+			i = k + 1;
+			if ((tmp - ecc[k]) < delta[1]) {
+				delta[0] = ecc[k];
+				delta[1] = tmp - ecc[k];
+			}
+		} else {
+			delta[0] = tmp;
+			break;
+		}
+	};
+
+	*eccstrength = delta[0];
+}
+EXPORT_SYMBOL(mtk_ecc_strength_convert);
 
 static int mtk_ecc_probe(struct platform_device *pdev)
 {

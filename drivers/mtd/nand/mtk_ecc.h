@@ -48,6 +48,7 @@ void mtk_ecc_disable_encode(struct mtk_ecc *);
 int mtk_ecc_start_encode(struct mtk_ecc *, struct mtk_ecc_enc_data *);
 void mtk_ecc_hw_init(struct mtk_ecc *);
 int mtk_ecc_config(struct mtk_ecc *, struct mtk_ecc_config *);
+void mtk_ecc_strength_convert(u32 *eccstrength);
 void mtk_ecc_release(struct mtk_ecc *);
 struct mtk_ecc *of_mtk_ecc_get(struct device_node *);
 

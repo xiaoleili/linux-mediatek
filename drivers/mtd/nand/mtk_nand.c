@@ -41,7 +41,21 @@
 #define		PAGEFMT_FDM_ECC_SHIFT	(12)
 #define		PAGEFMT_FDM_SHIFT	(8)
 #define		PAGEFMT_SPARE_16	(0)
+#define		PAGEFMT_SPARE_26	(1)
+#define		PAGEFMT_SPARE_27	(2)
 #define		PAGEFMT_SPARE_28	(3)
+#define		PAGEFMT_SPARE_32	(4)
+#define		PAGEFMT_SPARE_36	(5)
+#define		PAGEFMT_SPARE_40	(6)
+#define		PAGEFMT_SPARE_44	(7)
+#define		PAGEFMT_SPARE_48	(8)
+#define		PAGEFMT_SPARE_49	(9)
+#define		PAGEFMT_SPARE_50	(0xa)
+#define		PAGEFMT_SPARE_51	(0xb)
+#define		PAGEFMT_SPARE_52	(0xc)
+#define		PAGEFMT_SPARE_62	(0xd)
+#define		PAGEFMT_SPARE_63	(0xe)
+#define		PAGEFMT_SPARE_64	(0xf)
 #define		PAGEFMT_SPARE_SHIFT	(4)
 #define		PAGEFMT_SEC_SEL_512	BIT(2)
 #define		PAGEFMT_512_2K		(0)
@@ -273,32 +287,88 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 		fmt = PAGEFMT_512_2K | PAGEFMT_SEC_SEL_512;
 		break;
 	case KB(2):
-		fmt = PAGEFMT_512_2K;
+		if (chip->ecc.size == 512)
+			fmt = PAGEFMT_2K_4K | PAGEFMT_SEC_SEL_512;
+		else
+			fmt = PAGEFMT_512_2K;
 		break;
 	case KB(4):
-		fmt = PAGEFMT_2K_4K;
+		if (chip->ecc.size == 512)
+			fmt = PAGEFMT_4K_8K | PAGEFMT_SEC_SEL_512;
+		else
+			fmt = PAGEFMT_2K_4K;
 		break;
 	case KB(8):
-		fmt = PAGEFMT_4K_8K;
+		if (chip->ecc.size == 512)
+			fmt = PAGEFMT_8K_16K | PAGEFMT_SEC_SEL_512;
+		else
+			fmt = PAGEFMT_4K_8K;
+		break;
+	case KB(16):
+		fmt = PAGEFMT_8K_16K;
 		break;
 	default:
 		dev_err(nfc->dev, "invalid page len: %d\n", mtd->writesize);
 		return -EINVAL;
 	}
 
-	if (mtd->writesize > 512)
+	if (chip->ecc.size == 1024)
 		spare >>= 1;
 
 	switch (spare) {
 	case 16:
 		fmt |= (PAGEFMT_SPARE_16 << PAGEFMT_SPARE_SHIFT);
 		break;
+	case 26:
+		fmt |= (PAGEFMT_SPARE_26 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 27:
+		fmt |= (PAGEFMT_SPARE_27 << PAGEFMT_SPARE_SHIFT);
+		break;
 	case 28:
 		fmt |= (PAGEFMT_SPARE_28 << PAGEFMT_SPARE_SHIFT);
 		break;
+	case 32:
+		fmt |= (PAGEFMT_SPARE_32 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 36:
+		fmt |= (PAGEFMT_SPARE_36 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 40:
+		fmt |= (PAGEFMT_SPARE_40 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 44:
+		fmt |= (PAGEFMT_SPARE_44 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 48:
+		fmt |= (PAGEFMT_SPARE_48 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 49:
+		fmt |= (PAGEFMT_SPARE_49 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 50:
+		fmt |= (PAGEFMT_SPARE_50 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 51:
+		fmt |= (PAGEFMT_SPARE_51 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 52:
+		fmt |= (PAGEFMT_SPARE_52 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 62:
+		fmt |= (PAGEFMT_SPARE_62 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 63:
+		fmt |= (PAGEFMT_SPARE_63 << PAGEFMT_SPARE_SHIFT);
+		break;
+	case 64:
+		fmt |= (PAGEFMT_SPARE_64 << PAGEFMT_SPARE_SHIFT);
+		break;
 	default:
+		dev_err(nfc->dev, "invalid spare len per sector %d\n", spare);
 		break;
 	}
+
 	fmt |= NFI_FDM_REG_SIZE << PAGEFMT_FDM_SHIFT;
 	fmt |= NFI_FDM_REG_SIZE << PAGEFMT_FDM_ECC_SHIFT;
 	nfi_writew(nfc, fmt, NFI_PAGEFMT);
@@ -963,6 +1033,77 @@ static const struct mtd_ooblayout_ops mtk_nfc_ooblayout_ops = {
 	.ecc = mtk_nfc_ooblayout_ecc,
 };
 
+static void mtk_nfc_spare_size_convert(u32 *sparesize)
+{
+	u32 spare[] = {16, 26, 27, 28, 32, 36, 40, 44,
+			48, 49, 50, 51, 52, 62, 63, 64};
+	int i = 0, j = sizeof(spare) / sizeof(u32) - 1, tmp = *sparesize;
+	int k, delta[2];
+
+	delta[0] = spare[0];
+	delta[1] = tmp - spare[0];
+
+	while (i <= j) {
+		k = (j + i) / 2;
+		if (tmp < spare[k]) {
+			j = k - 1;
+		} else if (tmp > spare[k]) {
+			i = k + 1;
+			if ((tmp - spare[k]) < delta[1]) {
+				delta[0] = spare[k];
+				delta[1] = tmp - spare[k];
+			}
+		} else {
+			delta[0] = tmp;
+			break;
+		}
+	};
+
+	*sparesize = delta[0];
+}
+
+static int mtk_nfc_param_init(struct device *dev, struct mtd_info *mtd)
+{
+	struct nand_chip *nand = mtd_to_nand(mtd);
+	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(nand);
+	u32 eccsteps;
+
+	/* if optional dt settings not present */
+	if (!nand->ecc.size) {
+		nand->ecc.strength = nand->ecc_strength_ds;
+		nand->ecc.size = nand->ecc_step_ds;
+	}
+
+	if (!nand->ecc.size || !nand->ecc.strength) {
+		dev_err(dev, "ecc size or strenth invalid\n");
+		return -EINVAL;
+	}
+
+	/* support only ecc hw mode */
+	if (nand->ecc.mode != NAND_ECC_HW) {
+		dev_err(dev, "driver only supports NAND_ECC_HW now\n");
+		return -EINVAL;
+	}
+
+	/* set nfc spare_per_sector */
+	eccsteps = mtd->writesize / nand->ecc.size;
+	mtk_nand->spare_per_sector = mtd->oobsize / eccsteps;
+
+	/* convert spare size */
+	if (nand->ecc.size == 1024)
+		mtk_nand->spare_per_sector >>= 1;
+	mtk_nfc_spare_size_convert(&mtk_nand->spare_per_sector);
+	if (nand->ecc.size == 1024)
+		mtk_nand->spare_per_sector <<= 1;
+
+	/* convert ecc strength*/
+	mtk_ecc_strength_convert(&nand->ecc.strength);
+
+	dev_warn(dev, "nfc param: eccsize %d eccstrength %d sparesize %d\n",
+		nand->ecc.size, nand->ecc.strength, mtk_nand->spare_per_sector);
+	return 0;
+}
+
 static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 				struct device_node *np)
 {
@@ -996,13 +1137,6 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 			return ret;
 		}
 		chip->sels[i] = tmp;
-	}
-
-	if (of_property_read_u32(np, "spare_per_sector",
-						&chip->spare_per_sector)) {
-		dev_err(dev, "missing spare_per_sector property in DT\n");
-		return -ENODEV;
-
 	}
 
 	nand = &chip->nand;
@@ -1048,11 +1182,9 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	if (ret)
 		return -ENODEV;
 
-	/* TODO: add NAND_ECC_SOFT */
-	if (nand->ecc.mode != NAND_ECC_HW) {
-		dev_err(dev, "driver only supports NAND_ECC_HW\n");
+	ret = mtk_nfc_param_init(dev, mtd);
+	if (ret)
 		return -ENODEV;
-	}
 
 	ret = nand_scan_tail(mtd);
 	if (ret)
