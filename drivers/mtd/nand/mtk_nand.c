@@ -221,13 +221,24 @@ static void mtk_nfc_hw_reset(struct mtk_nfc *nfc)
 	u32 val;
 	int ret;
 
+	/*
+	 * First reset to reset all registers and force the NFI master
+	 * be early terminated.
+	 */
 	nfi_writel(nfc, CON_FIFO_FLUSH | CON_NFI_RST, NFI_CON);
 
+	/* wait for the master to finish the last transaction */
 	ret = readl_poll_timeout(nfc->regs + NFI_MASTER_STA, val,
 			!(val & MASTER_STA_MASK), 50, MTK_RESET_TIMEOUT);
 	if (ret)
 		dev_warn(dev, "master active in reset [0x%x] = 0x%x\n",
 			NFI_MASTER_STA, val);
+
+	/*
+	 * The second NFI reset is to ensure any status register affected
+	 * by the NFI master is reset to normal status.
+	 */
+	nfi_writel(nfc, CON_FIFO_FLUSH | CON_NFI_RST, NFI_CON);
 
 	nfi_writew(nfc, STAR_DE, NFI_STRDATA);
 }
@@ -446,12 +457,6 @@ static inline uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 
 		/* trigger to fetch data */
 		nfi_writew(nfc, STAR_EN, NFI_STRDATA);
-
-		/* hardware issue work around:
-		 * The first byte of data may be wrong right after the trigger.
-		 * (The controller fetches data until the internal FIFO is full)
-		 */
-		udelay(10);
 	}
 
 	mtk_nfc_wait_ioready(nfc);
