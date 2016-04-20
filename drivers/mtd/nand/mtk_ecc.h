@@ -17,16 +17,7 @@
 struct device_node;
 struct mtk_ecc;
 
-/**
- * @len: number of bytes in the data buffer
- * @data: pointer to memory holding the data
- * @strength: number of correctable bits
- */
-struct mtk_ecc_enc_data {
-	unsigned int len;
-	int strength;
-	u8 *data;
-};
+enum mtk_ecc_codec {ecc_enc, ecc_dec};
 
 struct mtk_ecc_stats {
 	u32 corrected;
@@ -39,19 +30,19 @@ struct mtk_ecc_config {
 	u32 step_len;
 };
 
-void mtk_ecc_enable_decode(struct mtk_ecc *);
-void mtk_ecc_disable_decode(struct mtk_ecc *);
+void mtk_ecc_enable(struct mtk_ecc *, enum mtk_ecc_codec);
+void mtk_ecc_disable(struct mtk_ecc *, enum mtk_ecc_codec);
 
-int mtk_ecc_wait_decode(struct mtk_ecc *);
-void mtk_ecc_enable_encode(struct mtk_ecc *);
-void mtk_ecc_disable_encode(struct mtk_ecc *);
-int mtk_ecc_start_encode(struct mtk_ecc *, struct mtk_ecc_enc_data *);
-void mtk_ecc_hw_init(struct mtk_ecc *);
-int mtk_ecc_config(struct mtk_ecc *, struct mtk_ecc_config *);
-void mtk_ecc_strength_convert(u32 *eccstrength);
-void mtk_ecc_release(struct mtk_ecc *);
-struct mtk_ecc *of_mtk_ecc_get(struct device_node *);
-
-void mtk_ecc_start_decode(struct mtk_ecc *, int sectors);
+int mtk_ecc_encode(struct mtk_ecc *, u8 *data, u32 bytes);
+void mtk_ecc_prepare_decoder(struct mtk_ecc *, int sectors);
+int mtk_ecc_wait_decoder_done(struct mtk_ecc *);
 void mtk_ecc_get_stats(struct mtk_ecc *, struct mtk_ecc_stats *, int sectors);
+
+int mtk_ecc_config(struct mtk_ecc *, struct mtk_ecc_config *);
+void mtk_ecc_hw_init(struct mtk_ecc *);
+void mtk_ecc_update_strength(u32 *);
+
+struct mtk_ecc *of_mtk_ecc_get(struct device_node *);
+void mtk_ecc_release(struct mtk_ecc *);
+
 #endif
