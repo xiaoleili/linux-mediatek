@@ -17,7 +17,7 @@
 struct device_node;
 struct mtk_ecc;
 
-enum mtk_ecc_codec {ecc_enc, ecc_dec};
+enum mtk_ecc_codec {ECC_ENC, ECC_DEC};
 
 struct mtk_ecc_stats {
 	u32 corrected;
@@ -34,8 +34,10 @@ void mtk_ecc_enable(struct mtk_ecc *, enum mtk_ecc_codec);
 void mtk_ecc_disable(struct mtk_ecc *, enum mtk_ecc_codec);
 
 int mtk_ecc_encode(struct mtk_ecc *, u8 *data, u32 bytes);
+
 void mtk_ecc_prepare_decoder(struct mtk_ecc *, int sectors);
 int mtk_ecc_wait_decoder_done(struct mtk_ecc *);
+
 void mtk_ecc_get_stats(struct mtk_ecc *, struct mtk_ecc_stats *, int sectors);
 
 int mtk_ecc_config(struct mtk_ecc *, struct mtk_ecc_config *);
