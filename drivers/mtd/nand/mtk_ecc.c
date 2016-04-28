@@ -49,9 +49,7 @@
 #define		ECC_CNFG_52BIT		(0x11)
 #define		ECC_CNFG_56BIT		(0x12)
 #define		ECC_CNFG_60BIT		(0x13)
-#define		ECC_NFI_MODE		BIT(5)
-#define		ECC_DMA_MODE		(0)
-#define		ECC_ENC_MODE_MASK	(0x3 << 5)
+#define		ECC_MODE_SHIFT		(5)
 #define		ECC_MS_SHIFT		(16)
 #define ECC_ENCDIADDR		(0x08)
 #define ECC_ENCIDLE		(0x0C)
@@ -80,6 +78,7 @@
 #define ECC_IDLE_REG(x)		(x == ECC_ENC ? ECC_ENCIDLE : ECC_DECIDLE)
 #define ECC_IDLE_MASK(x)	(x == ECC_ENC ? ENC_IDLE : DEC_IDLE)
 #define ECC_IRQ_REG(x)		(x == ECC_ENC ? ECC_ENCIRQ_EN : ECC_DECIRQ_EN)
+#define ECC_IRQ_EN(x)		(x == ECC_ENC ? ENC_IRQEN : DEC_IRQEN)
 #define ECC_CTL_REG(x)		(x == ECC_ENC ? ECC_ENCCON : ECC_DECCON)
 #define ECC_CODEC_ENABLE(x)	(x == ECC_ENC ? ENC_EN : DEC_EN)
 #define ECC_CODEC_DISABLE(x)	(x == ECC_ENC ? ENC_DE : DEC_DE)
@@ -90,7 +89,7 @@ struct mtk_ecc {
 	struct clk *clk;
 	struct completion done;
 	u32 sec_mask;
-	u32 strength;
+	struct mutex lock;
 };
 
 static inline void mtk_ecc_codec_wait_idle(struct mtk_ecc *ecc,
@@ -139,6 +138,97 @@ static irqreturn_t mtk_ecc_irq(int irq, void *id)
 	writel(0, ecc->regs + ECC_IRQ_REG(codec));
 
 	return IRQ_HANDLED;
+}
+
+static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
+{
+	u32 ecc_bit, dec_sz, enc_sz;
+	u32 reg;
+
+	switch (config->strength) {
+	case 4:
+		ecc_bit = ECC_CNFG_4BIT;
+		break;
+	case 6:
+		ecc_bit = ECC_CNFG_6BIT;
+		break;
+	case 8:
+		ecc_bit = ECC_CNFG_8BIT;
+		break;
+	case 10:
+		ecc_bit = ECC_CNFG_10BIT;
+		break;
+	case 12:
+		ecc_bit = ECC_CNFG_12BIT;
+		break;
+	case 14:
+		ecc_bit = ECC_CNFG_14BIT;
+		break;
+	case 16:
+		ecc_bit = ECC_CNFG_16BIT;
+		break;
+	case 18:
+		ecc_bit = ECC_CNFG_18BIT;
+		break;
+	case 20:
+		ecc_bit = ECC_CNFG_20BIT;
+		break;
+	case 22:
+		ecc_bit = ECC_CNFG_22BIT;
+		break;
+	case 24:
+		ecc_bit = ECC_CNFG_24BIT;
+		break;
+	case 28:
+		ecc_bit = ECC_CNFG_28BIT;
+		break;
+	case 32:
+		ecc_bit = ECC_CNFG_32BIT;
+		break;
+	case 36:
+		ecc_bit = ECC_CNFG_36BIT;
+		break;
+	case 40:
+		ecc_bit = ECC_CNFG_40BIT;
+		break;
+	case 44:
+		ecc_bit = ECC_CNFG_44BIT;
+		break;
+	case 48:
+		ecc_bit = ECC_CNFG_48BIT;
+		break;
+	case 52:
+		ecc_bit = ECC_CNFG_52BIT;
+		break;
+	case 56:
+		ecc_bit = ECC_CNFG_56BIT;
+		break;
+	case 60:
+		ecc_bit = ECC_CNFG_60BIT;
+		break;
+	default:
+		dev_err(ecc->dev, "invalid strength %d\n", config->strength);
+	}
+
+	if (config->codec == ECC_ENC) {
+		/* configure ECC encoder (in bits) */
+		enc_sz = config->enc_len << 3;
+		reg = ecc_bit | (config->ecc_mode << ECC_MODE_SHIFT);
+		reg |= (enc_sz << ECC_MS_SHIFT);
+		writel(reg, ecc->regs + ECC_ENCCNFG);
+	} else {
+		/* configure ECC decoder (in bits) */
+		dec_sz = config->dec_len;
+		reg = ecc_bit | (config->ecc_mode << ECC_MODE_SHIFT);
+		reg |= (dec_sz << ECC_MS_SHIFT) | DEC_CNFG_CORRECT;
+		reg |= DEC_EMPTY_EN;
+		writel(reg, ecc->regs + ECC_DECCNFG);
+		if (config->sec_mask)
+			ecc->sec_mask = 1 << (config->sec_mask - 1);
+	}
+
+	if (config->ecc_mode != ECC_NFI_MODE)
+		writel(lower_32_bits(config->addr), ecc->regs + ECC_ENCDIADDR);
 }
 
 void mtk_ecc_get_stats(struct mtk_ecc *ecc, struct mtk_ecc_stats *stats,
@@ -208,80 +298,72 @@ struct mtk_ecc *of_mtk_ecc_get(struct device_node *of_node)
 }
 EXPORT_SYMBOL(of_mtk_ecc_get);
 
-void mtk_ecc_enable(struct mtk_ecc *ecc, enum mtk_ecc_codec codec)
+void mtk_ecc_enable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
+	enum mtk_ecc_codec codec = config->codec;
+
+	mutex_lock(&ecc->lock);
 	mtk_ecc_codec_wait_idle(ecc, codec);
+	mtk_ecc_config(ecc, config);
 	writew(ECC_CODEC_ENABLE(codec), ecc->regs + ECC_CTL_REG(codec));
+
+	init_completion(&ecc->done);
+	writew(ECC_IRQ_EN(codec), ecc->regs + ECC_IRQ_REG(codec));
 }
 EXPORT_SYMBOL(mtk_ecc_enable);
 
-void mtk_ecc_disable(struct mtk_ecc *ecc, enum mtk_ecc_codec codec)
+void mtk_ecc_disable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
-	writew(0, ecc->regs + ECC_IRQ_REG(codec));
+	enum mtk_ecc_codec codec = config->codec;
+
 	mtk_ecc_codec_wait_idle(ecc, codec);
+	writew(0, ecc->regs + ECC_IRQ_REG(codec));
 	writew(ECC_CODEC_DISABLE(codec), ecc->regs + ECC_CTL_REG(codec));
+	mutex_unlock(&ecc->lock);
 }
 EXPORT_SYMBOL(mtk_ecc_disable);
 
-void mtk_ecc_prepare_decoder(struct mtk_ecc *ecc, int sectors)
-{
-	ecc->sec_mask = 1 << (sectors - 1);
-	init_completion(&ecc->done);
-	writew(DEC_IRQEN, ecc->regs + ECC_DECIRQ_EN);
-}
-EXPORT_SYMBOL(mtk_ecc_prepare_decoder);
-
-int mtk_ecc_wait_decoder_done(struct mtk_ecc *ecc)
+int mtk_ecc_wait_irq_done(struct mtk_ecc *ecc, enum mtk_ecc_codec codec)
 {
 	int ret;
 
 	ret = wait_for_completion_timeout(&ecc->done, msecs_to_jiffies(500));
 	if (!ret) {
-		dev_err(ecc->dev, "decode timeout\n");
+		dev_err(ecc->dev, "%scode timeout\n",
+				(codec == ECC_ENC) ? "en" : "de");
 		return -ETIMEDOUT;
 	}
 
 	return 0;
 }
-EXPORT_SYMBOL(mtk_ecc_wait_decoder_done);
+EXPORT_SYMBOL(mtk_ecc_wait_irq_done);
 
-int mtk_ecc_encode(struct mtk_ecc *ecc, u8 *data, u32 bytes)
+int mtk_ecc_encode_non_nfi_mode(struct mtk_ecc *ecc,
+			struct mtk_ecc_config *config, u8 *data, u32 bytes)
 {
 	dma_addr_t addr;
-	u32 *p, len;
-	u32 reg, i;
-	int rc, ret = 0;
+	u32 *p, len, i;
+	int ret = 0;
 
 	addr = dma_map_single(ecc->dev, data, bytes, DMA_TO_DEVICE);
-	rc = dma_mapping_error(ecc->dev, addr);
-	if (rc) {
+	ret = dma_mapping_error(ecc->dev, addr);
+	if (ret) {
 		dev_err(ecc->dev, "dma mapping error\n");
 		return -EINVAL;
 	}
 
-	/* enable the encoder in DMA mode to calculate the ECC bytes  */
-	reg = readl(ecc->regs + ECC_ENCCNFG) & ~ECC_ENC_MODE_MASK;
-	reg |= ECC_DMA_MODE;
-	writel(reg, ecc->regs + ECC_ENCCNFG);
+	config->codec = ECC_ENC;
+	config->addr = addr;
+	mtk_ecc_enable(ecc, config);
 
-	writel(ENC_IRQEN, ecc->regs + ECC_ENCIRQ_EN);
-	writel(lower_32_bits(addr), ecc->regs + ECC_ENCDIADDR);
-
-	init_completion(&ecc->done);
-	writew(ENC_EN, ecc->regs + ECC_ENCCON);
-
-	rc = wait_for_completion_timeout(&ecc->done, msecs_to_jiffies(500));
-	if (!rc) {
-		dev_err(ecc->dev, "encode timeout\n");
-		writel(0, ecc->regs + ECC_ENCIRQ_EN);
-		ret = -ETIMEDOUT;
+	ret = mtk_ecc_wait_irq_done(ecc, ECC_ENC);
+	if (ret)
 		goto timeout;
-	}
 
 	mtk_ecc_codec_wait_idle(ecc, ECC_ENC);
 
 	/* Program ECC bytes to OOB: per sector oob = FDM + ECC + SPARE */
-	len = (ecc->strength * ECC_PARITY_BITS + 7) >> 3;
+	len = (config->strength * ECC_PARITY_BITS + 7) >> 3;
 	p = (u32 *) (data + bytes);
 
 	/* write the parity bytes generated by the ECC back to the OOB region */
@@ -291,15 +373,11 @@ int mtk_ecc_encode(struct mtk_ecc *ecc, u8 *data, u32 bytes)
 timeout:
 
 	dma_unmap_single(ecc->dev, addr, bytes, DMA_TO_DEVICE);
-
-	writew(0, ecc->regs + ECC_ENCCON);
-	reg = readl(ecc->regs + ECC_ENCCNFG) & ~ECC_ENC_MODE_MASK;
-	reg |= ECC_NFI_MODE;
-	writel(reg, ecc->regs + ECC_ENCCNFG);
+	mtk_ecc_disable(ecc, config);
 
 	return ret;
 }
-EXPORT_SYMBOL(mtk_ecc_encode);
+EXPORT_SYMBOL(mtk_ecc_encode_non_nfi_mode);
 
 void mtk_ecc_hw_init(struct mtk_ecc *ecc)
 {
@@ -309,95 +387,6 @@ void mtk_ecc_hw_init(struct mtk_ecc *ecc)
 	mtk_ecc_codec_wait_idle(ecc, ECC_DEC);
 	writel(DEC_DE, ecc->regs + ECC_DECCON);
 }
-
-int mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
-{
-	u32 ecc_bit, dec_sz, enc_sz;
-	u32 reg;
-
-	switch (config->strength) {
-	case 4:
-		ecc_bit = ECC_CNFG_4BIT;
-		break;
-	case 6:
-		ecc_bit = ECC_CNFG_6BIT;
-		break;
-	case 8:
-		ecc_bit = ECC_CNFG_8BIT;
-		break;
-	case 10:
-		ecc_bit = ECC_CNFG_10BIT;
-		break;
-	case 12:
-		ecc_bit = ECC_CNFG_12BIT;
-		break;
-	case 14:
-		ecc_bit = ECC_CNFG_14BIT;
-		break;
-	case 16:
-		ecc_bit = ECC_CNFG_16BIT;
-		break;
-	case 18:
-		ecc_bit = ECC_CNFG_18BIT;
-		break;
-	case 20:
-		ecc_bit = ECC_CNFG_20BIT;
-		break;
-	case 22:
-		ecc_bit = ECC_CNFG_22BIT;
-		break;
-	case 24:
-		ecc_bit = ECC_CNFG_24BIT;
-		break;
-	case 28:
-		ecc_bit = ECC_CNFG_28BIT;
-		break;
-	case 32:
-		ecc_bit = ECC_CNFG_32BIT;
-		break;
-	case 36:
-		ecc_bit = ECC_CNFG_36BIT;
-		break;
-	case 40:
-		ecc_bit = ECC_CNFG_40BIT;
-		break;
-	case 44:
-		ecc_bit = ECC_CNFG_44BIT;
-		break;
-	case 48:
-		ecc_bit = ECC_CNFG_48BIT;
-		break;
-	case 52:
-		ecc_bit = ECC_CNFG_52BIT;
-		break;
-	case 56:
-		ecc_bit = ECC_CNFG_56BIT;
-		break;
-	case 60:
-		ecc_bit = ECC_CNFG_60BIT;
-		break;
-	default:
-		dev_err(ecc->dev, "invalid strength %d\n", config->strength);
-		return -EINVAL;
-	}
-
-	/* configure ECC encoder (in bits) */
-	enc_sz = config->step_len << 3;
-	reg = ecc_bit | ECC_NFI_MODE | (enc_sz << ECC_MS_SHIFT);
-	writel(reg, ecc->regs + ECC_ENCCNFG);
-
-	/* configure ECC decoder (in bits) */
-	dec_sz = enc_sz + config->strength * ECC_PARITY_BITS;
-	reg = ecc_bit | ECC_NFI_MODE | (dec_sz << ECC_MS_SHIFT);
-	reg |= DEC_CNFG_CORRECT | DEC_EMPTY_EN;
-	writel(reg, ecc->regs + ECC_DECCNFG);
-
-	/* update local copy */
-	ecc->strength = config->strength;
-
-	return 0;
-}
-EXPORT_SYMBOL(mtk_ecc_config);
 
 void mtk_ecc_update_strength(u32 *p)
 {
@@ -462,6 +451,8 @@ static int mtk_ecc_probe(struct platform_device *pdev)
 	}
 
 	ecc->dev = dev;
+
+	mutex_init(&ecc->lock);
 
 	platform_set_drvdata(pdev, ecc);
 
