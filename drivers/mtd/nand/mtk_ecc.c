@@ -76,7 +76,6 @@
 #define ECC_DECIRQ_STA		(0x204)
 
 #define ECC_TIMEOUT		(500000)
-#define ECC_PARITY_BITS		(14)
 
 #define ECC_IDLE_REG(x)		(x == ECC_ENC ? ECC_ENCIDLE : ECC_DECIDLE)
 #define ECC_IDLE_MASK(x)	(x == ECC_ENC ? ENC_IDLE : DEC_IDLE)
@@ -132,7 +131,8 @@ static irqreturn_t mtk_ecc_irq(int irq, void *id)
 		if (dec & ecc->sec_mask) {
 			ecc->sec_mask = 0;
 			complete(&ecc->done);
-		}
+		} else
+			return IRQ_HANDLED;
 	} else
 		complete(&ecc->done);
 

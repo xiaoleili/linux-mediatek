@@ -100,9 +100,9 @@
 #define NFI_STRADDR		(0x80)
 #define NFI_BYTELEN		(0x84)
 #define NFI_CSEL		(0x90)
-#define NFI_FDM_ECC_SIZE	(1)
 #define NFI_FDML(x)		(0xA0 + (x) * sizeof(u32) * 2)
 #define NFI_FDMM(x)		(0xA4 + (x) * sizeof(u32) * 2)
+#define NFI_FDM_MAX_SIZE	(8)
 #define NFI_MASTER_STA		(0x224)
 #define		MASTER_STA_MASK		(0x0FFF)
 #define NFI_EMPTY_THRESH	(0x23C)
@@ -1016,6 +1016,20 @@ static const struct mtd_ooblayout_ops mtk_nfc_ooblayout_ops = {
 	.ecc = mtk_nfc_ooblayout_ecc,
 };
 
+static void mtk_nfc_set_fdm_size(struct mtd_info *mtd)
+{
+	struct nand_chip *nand = mtd_to_nand(mtd);
+	struct mtk_nfc_nand_chip *chip = to_mtk_nand(nand);
+	u32 ecc_bytes, free_bytes;
+
+	ecc_bytes = DIV_ROUND_UP(nand->ecc.strength * ECC_PARITY_BITS, 8);
+	chip->fdm.reg_size = chip->spare_per_sector - ecc_bytes;
+	if (chip->fdm.reg_size > NFI_FDM_MAX_SIZE)
+		chip->fdm.reg_size = NFI_FDM_MAX_SIZE;
+	/* set fdm ecc size as 1 to store bad block mark */
+	chip->fdm.ecc_size = 1;
+}
+
 static void mtk_nfc_set_bad_mark_ctl(struct mtk_nfc_bad_mark_ctl *bm_ctl,
 				struct mtd_info *mtd)
 {
@@ -1174,16 +1188,8 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 		return -EINVAL;
 
 	mtk_nfc_set_spare_per_sector(&chip->spare_per_sector, mtd);
+	mtk_nfc_set_fdm_size(mtd);
 	mtk_nfc_set_bad_mark_ctl(&chip->bad_mark, mtd);
-
-	if (nand_is_slc(nand)){
-		/* need to add the corresponding maths/function */
-		chip->fdm.reg_size = 8;
-		chip->fdm.ecc_size = 1;
-	} else {
-		dev_err(dev, "only SLC NAND supported on this version\n");
-		return -EINVAL;
-	}
 
 	len = mtd->writesize + mtd->oobsize;
 	nfc->buffer = devm_kzalloc(dev, len, GFP_KERNEL);

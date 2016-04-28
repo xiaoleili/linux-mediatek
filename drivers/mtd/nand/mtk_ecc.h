@@ -14,6 +14,8 @@
 
 #include <linux/types.h>
 
+#define ECC_PARITY_BITS		(14)
+
 struct device_node;
 struct mtk_ecc;
 
