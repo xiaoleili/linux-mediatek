@@ -78,18 +78,17 @@
 #define ECC_TIMEOUT		(500000)
 #define ECC_PARITY_BITS		(14)
 
-#define ECC_IDLE_REG(x)		(x == ecc_enc ? ECC_ENCIDLE : ECC_DECIDLE)
-#define ECC_IDLE_MASK(x)	(x == ecc_enc ? ENC_IDLE : DEC_IDLE)
-#define ECC_IRQ_REG(x)		(x == ecc_enc ? ECC_ENCIRQ_EN : ECC_DECIRQ_EN)
-#define ECC_CTL_REG(x)		(x == ecc_enc ? ECC_ENCCON : ECC_DECCON)
-#define ECC_CODEC_ENABLE(x)	(x == ecc_enc ? ENC_EN : DEC_EN)
-#define ECC_CODEC_DISABLE(x)	(x == ecc_enc ? ENC_DE : DEC_DE)
+#define ECC_IDLE_REG(x)		(x == ECC_ENC ? ECC_ENCIDLE : ECC_DECIDLE)
+#define ECC_IDLE_MASK(x)	(x == ECC_ENC ? ENC_IDLE : DEC_IDLE)
+#define ECC_IRQ_REG(x)		(x == ECC_ENC ? ECC_ENCIRQ_EN : ECC_DECIRQ_EN)
+#define ECC_CTL_REG(x)		(x == ECC_ENC ? ECC_ENCCON : ECC_DECCON)
+#define ECC_CODEC_ENABLE(x)	(x == ECC_ENC ? ENC_EN : DEC_EN)
+#define ECC_CODEC_DISABLE(x)	(x == ECC_ENC ? ENC_DE : DEC_DE)
 
 struct mtk_ecc {
 	struct device *dev;
 	void __iomem *regs;
 	struct clk *clk;
-
 	struct completion done;
 	u32 sec_mask;
 	u32 strength;
@@ -107,16 +106,23 @@ static inline void mtk_ecc_codec_wait_idle(struct mtk_ecc *ecc,
 					10, ECC_TIMEOUT);
 	if (ret)
 		dev_warn(dev, "%s NOT idle\n",
-			codec == ecc_enc ? "encoder" : "decoder");
+			codec == ECC_ENC ? "encoder" : "decoder");
 }
 
 static irqreturn_t mtk_ecc_irq(int irq, void *id)
 {
 	struct mtk_ecc *ecc = id;
+	enum mtk_ecc_codec codec;
 	u32 dec, enc;
 
 	dec = readw(ecc->regs + ECC_DECIRQ_STA) & DEC_IRQEN;
-	enc = readl(ecc->regs + ECC_ENCIRQ_STA) & ENC_IRQEN;
+	if (dec)
+		codec = ECC_DEC;
+	else {
+		enc = readl(ecc->regs + ECC_ENCIRQ_STA) & ENC_IRQEN;
+		if (enc)
+			codec = ECC_ENC;
+	}
 
 	if (!(dec || enc))
 		return IRQ_NONE;
@@ -126,12 +132,11 @@ static irqreturn_t mtk_ecc_irq(int irq, void *id)
 		if (dec & ecc->sec_mask) {
 			ecc->sec_mask = 0;
 			complete(&ecc->done);
-			writew(0, ecc->regs + ECC_DECIRQ_EN);
 		}
-	} else {
+	} else
 		complete(&ecc->done);
-		writel(0, ecc->regs + ECC_ENCIRQ_EN);
-	}
+
+	writel(0, ecc->regs + ECC_IRQ_REG(codec));
 
 	return IRQ_HANDLED;
 }
@@ -273,7 +278,7 @@ int mtk_ecc_encode(struct mtk_ecc *ecc, u8 *data, u32 bytes)
 		goto timeout;
 	}
 
-	mtk_ecc_codec_wait_idle(ecc, ecc_enc);
+	mtk_ecc_codec_wait_idle(ecc, ECC_ENC);
 
 	/* Program ECC bytes to OOB: per sector oob = FDM + ECC + SPARE */
 	len = (ecc->strength * ECC_PARITY_BITS + 7) >> 3;
@@ -298,10 +303,10 @@ EXPORT_SYMBOL(mtk_ecc_encode);
 
 void mtk_ecc_hw_init(struct mtk_ecc *ecc)
 {
-	mtk_ecc_codec_wait_idle(ecc, ecc_enc);
+	mtk_ecc_codec_wait_idle(ecc, ECC_ENC);
 	writew(ENC_DE, ecc->regs + ECC_ENCCON);
 
-	mtk_ecc_codec_wait_idle(ecc, ecc_dec);
+	mtk_ecc_codec_wait_idle(ecc, ECC_DEC);
 	writel(DEC_DE, ecc->regs + ECC_DECCON);
 }
 
