@@ -44,26 +44,27 @@ Children nodes properties:
 - reg:			Chip Select Signal, default 0.
 			Set as reg = <0>, <1> when need 2 CS.
 - nand-on-flash-bbt:	Store BBT on NAND Flash.
-- nand-ecc-mode:	NAND ecc mode (check driver for supported modes)
-- nand-ecc-strength:	Number of bits to correct per ECC step.
-			The vaild values we support are 4, 6, 8, 10, 12, 14,
-			16, 18, 20, 22, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60.
-			You can get a appropriate ecc strength by this formula :
-			E = (S - F) * 8 / 14;
-			S = O / (P / Q);
-			E is nand-ecc-strength;
-			S is spare size per sector;
-			F is FDM size, which should be 1 ~ 8.
-			FDM is used to store free oob data;
-			O is the oob size;
-			P is the page size;
-			Q is nand-ecc-step-size;
-			If the result does not match any one of the list
-			choices above, please arrange a smaller valid value.
+- nand-ecc-mode:	the NAND ecc mode (check driver for supported modes)
 - nand-ecc-step-size:	Number of data bytes covered by a single ECC step. It is
 			recommended to set 1024 if there is large page NAND.
-
 Optional:
+- nand-ecc-strength:	Number of bits to correct per ECC step.
+			The valid values we support are: 4, 6, 8, 10, 12, 14,
+			16, 18, 20, 22, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60.
+			The strength should be calculated as follows:
+			E = (S - F) * 8 / 14
+			S = O / (P / Q)
+				E :nand-ecc-strength;
+				S :spare size per sector;
+				F : FDM size,should be in the range [1,8]. It is
+				used to store free oob data.
+				O : oob size;
+				P : page size;
+				Q :nand-ecc-step-size
+			If the result does not match any one of the listed
+			choices above, please select the smaller valid value from
+			the list.
+			(otherwise the driver will do the clamping for you)
 - vmch-supply:		NAND power supply.
 - pinctrl-names:	Default NAND pin GPIO setting name.
 - pinctrl-0:		GPIO setting node.
