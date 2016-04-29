@@ -140,7 +140,7 @@ static irqreturn_t mtk_ecc_irq(int irq, void *id)
 
 static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
-	u32 ecc_bit = ECC_CNFG_24BIT, dec_sz, enc_sz;
+	u32 ecc_bit = ECC_CNFG_4BIT, dec_sz, enc_sz;
 	u32 reg;
 
 	switch (config->strength) {

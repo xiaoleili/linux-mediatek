@@ -65,7 +65,6 @@
 	pinctrl-0 = <&nand_pins_default>;
 	chip@0 {
 		reg = <0>;
-		spare_per_sector = <56>;
 		nand-on-flash-bbt;
 		nand-ecc-mode = "hw";
 		nand-ecc-strength = <24>;

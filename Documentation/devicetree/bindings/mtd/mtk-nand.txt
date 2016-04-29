@@ -43,11 +43,12 @@ Platform related properties, should be set in {platform_name}.dts:
 Children nodes properties:
 - reg:			Chip Select Signal, default 0.
 			Set as reg = <0>, <1> when need 2 CS.
+Optional:
 - nand-on-flash-bbt:	Store BBT on NAND Flash.
 - nand-ecc-mode:	the NAND ecc mode (check driver for supported modes)
-- nand-ecc-step-size:	Number of data bytes covered by a single ECC step. It is
-			recommended to set 1024 if there is large page NAND.
-Optional:
+- nand-ecc-step-size:	Number of data bytes covered by a single ECC step. Only
+			support 512 and 1024. It is recommended to set 1024 if
+			there is large page NAND.
 - nand-ecc-strength:	Number of bits to correct per ECC step.
 			The valid values we support are: 4, 6, 8, 10, 12, 14,
 			16, 18, 20, 22, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60.

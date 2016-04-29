@@ -1100,22 +1100,21 @@ static void mtk_nfc_set_spare_per_sector(u32 *sps, struct mtd_info *mtd)
 static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 {
 	struct nand_chip *nand = mtd_to_nand(mtd);
-
-	/* if optional dt settings not present */
-	if (!nand->ecc.size) {
-		nand->ecc.strength = nand->ecc_strength_ds;
-		nand->ecc.size = nand->ecc_step_ds;
-	}
-
-	if (!nand->ecc.size || !nand->ecc.strength) {
-		dev_err(dev, "ecc size or stregnth invalid\n");
-		return -EINVAL;
-	}
+	u32 spare;
 
 	/* support only ecc hw mode */
 	if (nand->ecc.mode != NAND_ECC_HW) {
 		dev_err(dev, "ecc.mode not supported\n");
 		return -EINVAL;
+	}
+
+	/* if optional dt settings not present */
+	if (!nand->ecc.size || !nand->ecc.strength) {
+		/* this controller just supports 512 and 1024 */
+		nand->ecc.size = (mtd->writesize > 512) ? 1024 : 512;
+		mtk_nfc_set_spare_per_sector(&spare, mtd);
+		spare -= NFI_FDM_MAX_SIZE;
+		nand->ecc.strength = (spare << 3) / ECC_PARITY_BITS;
 	}
 
 	mtk_ecc_update_strength(&nand->ecc.strength);
@@ -1168,8 +1167,6 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	nand_set_controller_data(nand, nfc);
 
 	nand->options |= NAND_USE_BOUNCE_BUFFER | NAND_SUBPAGE_READ;
-	/* store bbt magic in page, cause OOB is not protected */
-	nand->bbt_options |= NAND_BBT_NO_OOB;
 	nand->dev_ready = mtk_nfc_dev_ready;
 	nand->select_chip = mtk_nfc_select_chip;
 	nand->write_byte = mtk_nfc_write_byte;
@@ -1204,6 +1201,10 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	ret = nand_scan_ident(mtd, nsels, NULL);
 	if (ret)
 		return -ENODEV;
+
+	/* store bbt magic in page, cause OOB is not protected */
+	if (nand->bbt_options & NAND_BBT_USE_FLASH)
+		nand->bbt_options |= NAND_BBT_NO_OOB;
 
 	ret = mtk_nfc_ecc_init(dev, mtd);
 	if (ret)
