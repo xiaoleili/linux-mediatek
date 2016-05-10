@@ -66,7 +66,6 @@ Optional:
 			choices above, please select the smaller valid value from
 			the list.
 			(otherwise the driver will do the clamping for you)
-- vmch-supply:		NAND power supply.
 - pinctrl-names:	Default NAND pin GPIO setting name.
 - pinctrl-0:		GPIO setting node.
 

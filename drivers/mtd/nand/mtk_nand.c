@@ -99,6 +99,7 @@
 #define NFI_FDML(x)		(0xA0 + (x) * sizeof(u32) * 2)
 #define NFI_FDMM(x)		(0xA4 + (x) * sizeof(u32) * 2)
 #define NFI_FDM_MAX_SIZE	(8)
+#define NFI_FDM_MIN_SIZE	(1)
 #define NFI_MASTER_STA		(0x224)
 #define		MASTER_STA_MASK		(0x0FFF)
 #define NFI_EMPTY_THRESH	(0x23C)
@@ -1101,6 +1102,7 @@ static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 {
 	struct nand_chip *nand = mtd_to_nand(mtd);
 	u32 spare;
+	int free;
 
 	/* support only ecc hw mode */
 	if (nand->ecc.mode != NAND_ECC_HW) {
@@ -1110,11 +1112,40 @@ static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 
 	/* if optional dt settings not present */
 	if (!nand->ecc.size || !nand->ecc.strength) {
-		/* this controller just supports 512 and 1024 */
-		nand->ecc.size = (mtd->writesize > 512) ? 1024 : 512;
+		/* use datasheet requirements */
+		nand->ecc.strength = nand->ecc_strength_ds;
+		nand->ecc.size = nand->ecc_step_ds;
+
+		/*
+		 * align eccstrength and eccsize
+		 * this controller just supports 512 and 1024 eccsize
+		 */
+		if (nand->ecc.size < 1024) {
+			if (mtd->writesize > 512) {
+				nand->ecc.size = 1024;
+				nand->ecc.strength <<= 1;
+			} else
+				nand->ecc.size = 512;
+		} else
+			nand->ecc.size = 1024;
+
 		mtk_nfc_set_spare_per_sector(&spare, mtd);
-		spare -= NFI_FDM_MAX_SIZE;
-		nand->ecc.strength = (spare << 3) / ECC_PARITY_BITS;
+
+		/* calculate oob bytes except ecc parity data */
+		free = ((nand->ecc.strength * ECC_PARITY_BITS) + 7) >> 3;
+		free = spare - free;
+		/*
+		 * enhance ecc strength if oob left is bigger than max FDM size
+		 * , or, reduce ecc strength if oob size is not enough for ecc
+		 * parity data.
+		 */
+		if (free > NFI_FDM_MAX_SIZE) {
+			spare -= NFI_FDM_MAX_SIZE;
+			nand->ecc.strength = (spare << 3) / ECC_PARITY_BITS;
+		} else if (free < 0) {
+			spare -= NFI_FDM_MIN_SIZE;
+			nand->ecc.strength = (spare << 3) / ECC_PARITY_BITS;
+		}
 	}
 
 	mtk_ecc_update_strength(&nand->ecc.strength);
