@@ -113,13 +113,15 @@
 #define MTK_MAX_SECTOR		(16)
 #define MTK_NAND_MAX_NSELS	(2)
 
-typedef void (*bad_mark_swap)(struct mtd_info *, uint8_t *buf, int raw);
 struct mtk_nfc_bad_mark_ctl {
-	bad_mark_swap bm_swap;
+	void (*bm_swap)(struct mtd_info *, uint8_t *buf, int raw);
 	u32 sec;
 	u32 pos;
 };
 
+/*
+ * FDM: region used to store free OOB data
+ */
 struct mtk_nfc_fdm {
 	u32 reg_size;
 	u32 ecc_size;
@@ -398,9 +400,7 @@ static int mtk_nfc_hw_runtime_config(struct mtd_info *mtd)
 	nfi_writew(nfc, fmt, NFI_PAGEFMT);
 
 	nfc->ecc_cfg.strength = chip->ecc.strength;
-	nfc->ecc_cfg.enc_len = chip->ecc.size + mtk_nand->fdm.ecc_size;
-	nfc->ecc_cfg.dec_len = (nfc->ecc_cfg.enc_len << 3)
-				+ chip->ecc.strength * ECC_PARITY_BITS;
+	nfc->ecc_cfg.len = chip->ecc.size + mtk_nand->fdm.ecc_size;
 
 	return 0;
 }
@@ -521,14 +521,14 @@ static int mtk_nfc_sector_encode(struct nand_chip *chip, u8 *data)
 	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	int size = chip->ecc.size + mtk_nand->fdm.reg_size;
 
-	nfc->ecc_cfg.ecc_mode = ECC_DMA_MODE;
+	nfc->ecc_cfg.mode = ECC_DMA_MODE;
 	nfc->ecc_cfg.codec = ECC_ENC;
-	return mtk_ecc_encode_non_nfi_mode(nfc->ecc, &nfc->ecc_cfg, data, size);
+	return mtk_ecc_encode(nfc->ecc, &nfc->ecc_cfg, data, size);
 }
 
 static void mtk_nfc_no_bad_mark_swap(struct mtd_info *a, uint8_t *b, int c)
 {
-	/* nope */
+	/* nop */
 }
 
 static void mtk_nfc_bad_mark_swap(struct mtd_info *mtd, uint8_t *buf, int raw)
@@ -696,7 +696,7 @@ static int mtk_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 		nfi_writew(nfc, reg | CNFG_HW_ECC_EN, NFI_CNFG);
 
 		nfc->ecc_cfg.codec = ECC_ENC;
-		nfc->ecc_cfg.ecc_mode = ECC_NFI_MODE;
+		nfc->ecc_cfg.mode = ECC_NFI_MODE;
 		ret = mtk_ecc_enable(nfc->ecc, &nfc->ecc_cfg);
 		if (ret) {
 			/* clear NFI config */
@@ -720,7 +720,7 @@ static int mtk_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	ret = mtk_nfc_do_write_page(mtd, chip, bufpoi, page, len);
 
 	if (!raw)
-		mtk_ecc_disable(nfc->ecc, &nfc->ecc_cfg);
+		mtk_ecc_disable(nfc->ecc);
 
 	return ret;
 }
@@ -835,8 +835,8 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 		reg |= CNFG_AUTO_FMT_EN | CNFG_HW_ECC_EN;
 		nfi_writew(nfc, reg, NFI_CNFG);
 
-		nfc->ecc_cfg.ecc_mode = ECC_NFI_MODE;
-		nfc->ecc_cfg.sec_mask = sectors;
+		nfc->ecc_cfg.mode = ECC_NFI_MODE;
+		nfc->ecc_cfg.sectors = sectors;
 		nfc->ecc_cfg.codec = ECC_DEC;
 		rc = mtk_ecc_enable(nfc->ecc, &nfc->ecc_cfg);
 		if (rc) {
@@ -885,7 +885,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	if (raw)
 		goto done;
 
-	mtk_ecc_disable(nfc->ecc, &nfc->ecc_cfg);
+	mtk_ecc_disable(nfc->ecc);
 
 	if (clamp(mtk_nand->bad_mark.sec, start, end) == mtk_nand->bad_mark.sec)
 		mtk_nand->bad_mark.bm_swap(mtd, bufpoi, raw);
@@ -944,7 +944,24 @@ static int mtk_nfc_read_oob_std(struct mtd_info *mtd, struct nand_chip *chip,
 
 static inline void mtk_nfc_hw_init(struct mtk_nfc *nfc)
 {
+	/* ACCON: access timing control register
+	 * -------------------------------------
+	 * 31:28: minimum required time for CS post pulling down after accesing the device
+	 * 27:22: minimum required time for CS pre pulling down before accesing the device
+	 * 21:16: minimum required time from NCEB low to NREB low
+	 * 15:12: minimum required time from NWEB high to NREB low.
+	 * 11:08: write enable hold time
+	 * 07:04: write wait states
+	 * 03:00: read wait states
+	 */
 	nfi_writel(nfc, 0x10804211, NFI_ACCCON);
+
+	/* CNRNB: nand ready/busy register
+	 * -------------------------------
+	 * 7:4: timeout register for polling the NAND busy/ready signal
+	 * 0  : poll the status of the busy/ready signal after [7:4] * 16 cycles.
+	 *
+	 */
 	nfi_writew(nfc, 0xf1, NFI_CNRNB);
 	nfi_writew(nfc, PAGEFMT_8K_16K, NFI_PAGEFMT);
 
@@ -1112,13 +1129,14 @@ static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 
 	/* if optional dt settings not present */
 	if (!nand->ecc.size || !nand->ecc.strength) {
+
 		/* use datasheet requirements */
 		nand->ecc.strength = nand->ecc_strength_ds;
 		nand->ecc.size = nand->ecc_step_ds;
 
 		/*
 		 * align eccstrength and eccsize
-		 * this controller just supports 512 and 1024 eccsize
+		 * this controller only supports 512 and 1024 sizes
 		 */
 		if (nand->ecc.size < 1024) {
 			if (mtd->writesize > 512) {
@@ -1148,7 +1166,7 @@ static int mtk_nfc_ecc_init(struct device *dev, struct mtd_info *mtd)
 		}
 	}
 
-	mtk_ecc_update_strength(&nand->ecc.strength);
+	mtk_ecc_adjust_strength(&nand->ecc.strength);
 
 	dev_info(dev, "eccsize %d eccstrength %d\n",
 		nand->ecc.size, nand->ecc.strength);

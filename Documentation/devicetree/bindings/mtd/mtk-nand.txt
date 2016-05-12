@@ -46,9 +46,9 @@ Children nodes properties:
 Optional:
 - nand-on-flash-bbt:	Store BBT on NAND Flash.
 - nand-ecc-mode:	the NAND ecc mode (check driver for supported modes)
-- nand-ecc-step-size:	Number of data bytes covered by a single ECC step. Only
-			support 512 and 1024. It is recommended to set 1024 if
-			there is large page NAND.
+- nand-ecc-step-size:	Number of data bytes covered by a single ECC step.
+			valid values: 512 and 1024.
+			1024 is recommended for large page NANDs.
 - nand-ecc-strength:	Number of bits to correct per ECC step.
 			The valid values we support are: 4, 6, 8, 10, 12, 14,
 			16, 18, 20, 22, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60.
