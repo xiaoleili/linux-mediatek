@@ -175,6 +175,9 @@ static inline uint8_t *oob_ptr(struct nand_chip *chip, int i)
 	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
 	uint8_t *poi;
 
+	/* map sector FDM data to free oob.
+	 * assign FDM data of bad mark secotr in the front of oob area.
+	 */
 	if (i < mtk_nand->bad_mark.sec)
 		poi = chip->oob_poi + (i + 1) * mtk_nand->fdm.reg_size;
 	else if (i == mtk_nand->bad_mark.sec)
@@ -466,6 +469,13 @@ static inline uint8_t mtk_nfc_read_byte(struct mtd_info *mtd)
 		reg |= CNFG_BYTE_RW | CNFG_READ_EN;
 		nfi_writew(nfc, reg, NFI_CNFG);
 
+		/* HW controller needs the sector number to decide how many
+		 * bytes to read. Then, NFI_STA will be reset automatically
+		 * after read. Actually, the read byte number may be not
+		 * sector size aligned, and driver will control the read byte
+		 * number itself. So, set MTK_MAX_SECTOR here to let HW keep
+		 * reading until driver reads enough bytes it needs.
+		 */
 		reg = (MTK_MAX_SECTOR << CON_SEC_SHIFT) | CON_BRD;
 		nfi_writel(nfc, reg, NFI_CON);
 
@@ -522,7 +532,7 @@ static int mtk_nfc_sector_encode(struct nand_chip *chip, u8 *data)
 	int size = chip->ecc.size + mtk_nand->fdm.reg_size;
 
 	nfc->ecc_cfg.mode = ECC_DMA_MODE;
-	nfc->ecc_cfg.codec = ECC_ENC;
+	nfc->ecc_cfg.codec_dir = ECC_ENC;
 	return mtk_ecc_encode(nfc->ecc, &nfc->ecc_cfg, data, size);
 }
 
@@ -606,26 +616,42 @@ static inline void mtk_nfc_read_fdm(struct nand_chip *chip, u32 start,
 					u32 sectors)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	u32 *p;
-	int i;
+	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
+	struct mtk_nfc_fdm *fdm = &mtk_nand->fdm;
+	u8 *oobptr;
+	u32 vall, valm;
+	int i, j;
 
 	for (i = 0; i < sectors; i++) {
-		p = (u32 *) oob_ptr(chip, start + i);
-		p[0] = nfi_readl(nfc, NFI_FDML(i));
-		p[1] = nfi_readl(nfc, NFI_FDMM(i));
+		oobptr = oob_ptr(chip, start + i);
+		vall = nfi_readl(nfc, NFI_FDML(i));
+		valm = nfi_readl(nfc, NFI_FDMM(i));
+		for (j = 0; j < fdm->reg_size; j++)
+			oobptr[j] = ((j >= 4) ? valm : vall) >> ((j % 4) * 8);
 	}
 }
 
 static inline void mtk_nfc_write_fdm(struct nand_chip *chip)
 {
 	struct mtk_nfc *nfc = nand_get_controller_data(chip);
-	u32 *p;
-	int i;
+	struct mtk_nfc_nand_chip *mtk_nand = to_mtk_nand(chip);
+	struct mtk_nfc_fdm *fdm = &mtk_nand->fdm;
+	u8 *oobptr;
+	u32 vall, valm;
+	int i, j;
 
-	for (i = 0; i < chip->ecc.steps ; i++) {
-		p = (u32 *) oob_ptr(chip, i);
-		nfi_writel(nfc, p[0], NFI_FDML(i));
-		nfi_writel(nfc, p[1], NFI_FDMM(i));
+	for (i = 0; i < chip->ecc.steps; i++) {
+		oobptr = oob_ptr(chip, i);
+		vall = 0;
+		valm = 0;
+		for (j = 0; j < 4; j++)
+			vall |= ((j < fdm->reg_size) ? oobptr[j] : 0xff)
+					<< (j * 8);
+		for (j = 4; j < 8; j++)
+			valm |= ((j < fdm->reg_size) ? oobptr[j] : 0xff)
+					<< ((j - 4) * 8);
+		nfi_writel(nfc, vall, NFI_FDML(i));
+		nfi_writel(nfc, valm, NFI_FDMM(i));
 	}
 }
 
@@ -695,7 +721,7 @@ static int mtk_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 		reg = nfi_readw(nfc, NFI_CNFG) | CNFG_AUTO_FMT_EN;
 		nfi_writew(nfc, reg | CNFG_HW_ECC_EN, NFI_CNFG);
 
-		nfc->ecc_cfg.codec = ECC_ENC;
+		nfc->ecc_cfg.codec_dir = ECC_ENC;
 		nfc->ecc_cfg.mode = ECC_NFI_MODE;
 		ret = mtk_ecc_enable(nfc->ecc, &nfc->ecc_cfg);
 		if (ret) {
@@ -837,7 +863,7 @@ static int mtk_nfc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 
 		nfc->ecc_cfg.mode = ECC_NFI_MODE;
 		nfc->ecc_cfg.sectors = sectors;
-		nfc->ecc_cfg.codec = ECC_DEC;
+		nfc->ecc_cfg.codec_dir = ECC_DEC;
 		rc = mtk_ecc_enable(nfc->ecc, &nfc->ecc_cfg);
 		if (rc) {
 			dev_err(nfc->dev, "ecc enable\n");
@@ -946,8 +972,10 @@ static inline void mtk_nfc_hw_init(struct mtk_nfc *nfc)
 {
 	/* ACCON: access timing control register
 	 * -------------------------------------
-	 * 31:28: minimum required time for CS post pulling down after accesing the device
-	 * 27:22: minimum required time for CS pre pulling down before accesing the device
+	 * 31:28: minimum required time for CS post pulling down after accesing
+	 * 		the device
+	 * 27:22: minimum required time for CS pre pulling down before accesing
+	 * 		the device
 	 * 21:16: minimum required time from NCEB low to NREB low
 	 * 15:12: minimum required time from NWEB high to NREB low.
 	 * 11:08: write enable hold time
@@ -959,7 +987,8 @@ static inline void mtk_nfc_hw_init(struct mtk_nfc *nfc)
 	/* CNRNB: nand ready/busy register
 	 * -------------------------------
 	 * 7:4: timeout register for polling the NAND busy/ready signal
-	 * 0  : poll the status of the busy/ready signal after [7:4] * 16 cycles.
+	 * 0  : poll the status of the busy/ready signal after
+	 * 	[7:4] * 16 cycles.
 	 *
 	 */
 	nfi_writew(nfc, 0xf1, NFI_CNRNB);
@@ -1251,6 +1280,11 @@ static int mtk_nfc_nand_chip_init(struct device *dev, struct mtk_nfc *nfc,
 	if (ret)
 		return -ENODEV;
 
+	if (nand->options & NAND_BUSWIDTH_16) {
+		dev_err(dev, "not support 16bits buswidth NAND\n");
+		return -EINVAL;
+	}
+
 	/* store bbt magic in page, cause OOB is not protected */
 	if (nand->bbt_options & NAND_BBT_USE_FLASH)
 		nand->bbt_options |= NAND_BBT_NO_OOB;
@@ -1435,6 +1469,7 @@ static int mtk_nfc_resume(struct device *dev)
 
 	mtk_nfc_hw_init(nfc);
 
+	/* to reset each NAND chip if VCC is power-off during resume */
 	list_for_each_entry(chip, &nfc->chips, node) {
 		nand = &chip->nand;
 		mtd = nand_to_mtd(nand);

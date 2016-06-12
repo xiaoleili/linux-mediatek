@@ -88,29 +88,29 @@ struct mtk_ecc {
 };
 
 static inline void mtk_ecc_codec_wait_idle(struct mtk_ecc *ecc,
-					enum mtk_ecc_codec codec)
+					enum mtk_ecc_codec_dir codec_dir)
 {
 	struct device *dev = ecc->dev;
 	u32 val;
 	int ret;
 
-	ret = readl_poll_timeout_atomic(ecc->regs + ECC_IDLE_REG(codec), val,
-					val & ECC_IDLE_MASK,
+	ret = readl_poll_timeout_atomic(ecc->regs + ECC_IDLE_REG(codec_dir),
+					val, val & ECC_IDLE_MASK,
 					10, ECC_TIMEOUT);
 	if (ret)
 		dev_warn(dev, "%s NOT idle\n",
-			codec == ECC_ENC ? "encoder" : "decoder");
+			codec_dir == ECC_ENC ? "encoder" : "decoder");
 }
 
 static irqreturn_t mtk_ecc_irq(int irq, void *id)
 {
 	struct mtk_ecc *ecc = id;
-	enum mtk_ecc_codec codec;
+	enum mtk_ecc_codec_dir codec_dir;
 	u32 dec, enc;
 
 	dec = readw(ecc->regs + ECC_DECIRQ_STA) & ECC_IRQ_EN;
 	if (dec) {
-		codec = ECC_DEC;
+		codec_dir = ECC_DEC;
 		dec = readw(ecc->regs + ECC_DECDONE);
 		if (dec & ecc->sectors) {
 			ecc->sectors = 0;
@@ -120,13 +120,13 @@ static irqreturn_t mtk_ecc_irq(int irq, void *id)
 	} else {
 		enc = readl(ecc->regs + ECC_ENCIRQ_STA) & ECC_IRQ_EN;
 		if (enc) {
-			codec = ECC_ENC;
+			codec_dir = ECC_ENC;
 			complete(&ecc->done);
 		} else
 			return IRQ_NONE;
 	}
 
-	writel(0, ecc->regs + ECC_IRQ_REG(codec));
+	writel(0, ecc->regs + ECC_IRQ_REG(codec_dir));
 
 	return IRQ_HANDLED;
 }
@@ -201,7 +201,7 @@ static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 		dev_err(ecc->dev, "invalid strength %d\n", config->strength);
 	}
 
-	if (config->codec == ECC_ENC) {
+	if (config->codec_dir == ECC_ENC) {
 		/* configure ECC encoder (in bits) */
 		enc_sz = config->len << 3;
 
@@ -215,7 +215,8 @@ static void mtk_ecc_config(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 
 	} else {
 		/* configure ECC decoder (in bits) */
-		dec_sz = (config->len << 3) + config->strength * ECC_PARITY_BITS;
+		dec_sz = (config->len << 3)
+				+ config->strength * ECC_PARITY_BITS;
 
 		reg = ecc_bit | (config->mode << ECC_MODE_SHIFT);
 		reg |= (dec_sz << ECC_MS_SHIFT) | DEC_CNFG_CORRECT;
@@ -305,7 +306,7 @@ EXPORT_SYMBOL(of_mtk_ecc_get);
 
 int mtk_ecc_enable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 {
-	enum mtk_ecc_codec codec = config->codec;
+	enum mtk_ecc_codec_dir codec_dir = config->codec_dir;
 	int ret;
 
 	ret = mutex_lock_interruptible(&ecc->lock);
@@ -314,12 +315,12 @@ int mtk_ecc_enable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 		return ret;
 	}
 
-	mtk_ecc_codec_wait_idle(ecc, codec);
+	mtk_ecc_codec_wait_idle(ecc, codec_dir);
 	mtk_ecc_config(ecc, config);
-	writew(ECC_CODEC_ENABLE, ecc->regs + ECC_CTL_REG(codec));
+	writew(ECC_CODEC_ENABLE, ecc->regs + ECC_CTL_REG(codec_dir));
 
 	init_completion(&ecc->done);
-	writew(ECC_IRQ_EN, ecc->regs + ECC_IRQ_REG(codec));
+	writew(ECC_IRQ_EN, ecc->regs + ECC_IRQ_REG(codec_dir));
 
 	return 0;
 }
@@ -327,29 +328,29 @@ EXPORT_SYMBOL(mtk_ecc_enable);
 
 void mtk_ecc_disable(struct mtk_ecc *ecc)
 {
-	enum mtk_ecc_codec codec = ECC_ENC;
+	enum mtk_ecc_codec_dir codec_dir = ECC_ENC;
 
-	/* find out the running codec */
-	if  (readw(ecc->regs + ECC_CTL_REG(codec)) != ECC_CODEC_ENABLE)
-	     codec = ECC_DEC;
+	/* find out the running codec dir */
+	if  (readw(ecc->regs + ECC_CTL_REG(codec_dir)) != ECC_CODEC_ENABLE)
+	     codec_dir = ECC_DEC;
 
 	/* disable it */
-	mtk_ecc_codec_wait_idle(ecc, codec);
-	writew(0, ecc->regs + ECC_IRQ_REG(codec));
-	writew(ECC_CODEC_DISABLE, ecc->regs + ECC_CTL_REG(codec));
+	mtk_ecc_codec_wait_idle(ecc, codec_dir);
+	writew(0, ecc->regs + ECC_IRQ_REG(codec_dir));
+	writew(ECC_CODEC_DISABLE, ecc->regs + ECC_CTL_REG(codec_dir));
 
 	mutex_unlock(&ecc->lock);
 }
 EXPORT_SYMBOL(mtk_ecc_disable);
 
-int mtk_ecc_wait_irq_done(struct mtk_ecc *ecc, enum mtk_ecc_codec codec)
+int mtk_ecc_wait_irq_done(struct mtk_ecc *ecc, enum mtk_ecc_codec_dir codec_dir)
 {
 	int ret;
 
 	ret = wait_for_completion_timeout(&ecc->done, msecs_to_jiffies(500));
 	if (!ret) {
 		dev_err(ecc->dev, "%s timeout - interrupt did not arrive)\n",
-				(codec == ECC_ENC) ? "encoder" : "decoder");
+				(codec_dir == ECC_ENC) ? "encoder" : "decoder");
 		return -ETIMEDOUT;
 	}
 
@@ -371,7 +372,7 @@ int mtk_ecc_encode(struct mtk_ecc *ecc, struct mtk_ecc_config *config,
 		return -EINVAL;
 	}
 
-	config->codec = ECC_ENC;
+	config->codec_dir = ECC_ENC;
 	config->addr = addr;
 	ret = mtk_ecc_enable(ecc, config);
 	if (ret) {
