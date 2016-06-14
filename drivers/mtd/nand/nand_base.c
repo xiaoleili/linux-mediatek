@@ -3995,6 +3995,8 @@ static int nand_dt_init(struct nand_chip *chip)
 
 	if (of_get_nand_on_flash_bbt(dn))
 		chip->bbt_options |= NAND_BBT_USE_FLASH;
+	else
+		pr_err("no on flash bbt setting\n");
 
 	ecc_mode = of_get_nand_ecc_mode(dn);
 	ecc_algo = of_get_nand_ecc_algo(dn);
@@ -4009,15 +4011,21 @@ static int nand_dt_init(struct nand_chip *chip)
 
 	if (ecc_mode >= 0)
 		chip->ecc.mode = ecc_mode;
+	else
+		pr_err("no ecc mode setting\n");
 
 	if (ecc_algo >= 0)
 		chip->ecc.algo = ecc_algo;
 
 	if (ecc_strength >= 0)
 		chip->ecc.strength = ecc_strength;
+	else
+		pr_err("no ecc strength setting\n");
 
 	if (ecc_step > 0)
 		chip->ecc.size = ecc_step;
+	else
+		pr_err("no ecc step setting\n");
 
 	return 0;
 }
@@ -4114,6 +4122,8 @@ static bool nand_ecc_strength_good(struct mtd_info *mtd)
 		/* Not enough information */
 		return true;
 
+	pr_err("ecc_strength_ds = %d, ecc_step_ds = %d\n", chip->ecc_strength_ds, chip->ecc_step_ds);
+
 	/*
 	 * We get the number of corrected bits per page to compare
 	 * the correction density.
@@ -4122,6 +4132,35 @@ static bool nand_ecc_strength_good(struct mtd_info *mtd)
 	ds_corr = (mtd->writesize * chip->ecc_strength_ds) / chip->ecc_step_ds;
 
 	return corr >= ds_corr && ecc->strength >= chip->ecc_strength_ds;
+}
+
+int erase_block_test(struct mtd_info *mtd, unsigned int ebnum)
+{
+       struct nand_chip *chip = mtd_to_nand(mtd);
+        int err;
+        struct erase_info ei;
+        loff_t addr = (loff_t)ebnum * mtd->erasesize;
+
+        memset(&ei, 0, sizeof(struct erase_info));
+        ei.mtd  = mtd;
+        ei.addr = addr;
+        ei.len  = mtd->erasesize;
+
+       /*
+        err = nand_erase(mtd, &ei, 1);
+        if (err) {
+                pr_info("error %d while erasing EB %d\n", err, ebnum);
+                return err;
+        }
+
+        if (ei.state == MTD_ERASE_FAILED) {
+                pr_info("some erase error occurred at EB %d\n", ebnum);
+                return -EIO;
+        }
+       */
+       chip->select_chip(mtd, 0);
+       single_erase(mtd, ebnum * 64);
+        return 0;
 }
 
 /**
@@ -4138,6 +4177,7 @@ int nand_scan_tail(struct mtd_info *mtd)
 	struct nand_ecc_ctrl *ecc = &chip->ecc;
 	struct nand_buffers *nbuf;
 	int ret;
+	u32 i;
 
 	/* New bad blocks should be marked in OOB, flash-based BBT, or both */
 	BUG_ON((chip->bbt_options & NAND_BBT_NO_OOB_BBM) &&
@@ -4422,6 +4462,9 @@ int nand_scan_tail(struct mtd_info *mtd)
 	/* Check, if we should skip the bad block table scan */
 	if (chip->options & NAND_SKIP_BBTSCAN)
 		return 0;
+
+//for (i = 0; i < 2048; i++)
+//erase_block_test(mtd, i);
 
 	/* Build bad block table */
 	return chip->scan_bbt(mtd);

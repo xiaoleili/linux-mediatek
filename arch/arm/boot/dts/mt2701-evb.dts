@@ -66,9 +66,6 @@
 	chip@0 {
 		reg = <0>;
 		nand-on-flash-bbt;
-		nand-ecc-mode = "hw";
-		nand-ecc-strength = <24>;
-		nand-ecc-step-size = <1024>;
 		partitions {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
