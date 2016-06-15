@@ -28,8 +28,8 @@
 
 #define ECC_IDLE_MASK		BIT(0)
 #define ECC_IRQ_EN		BIT(0)
-#define ECC_CODEC_ENABLE	(1)
-#define ECC_CODEC_DISABLE	(0)
+#define ECC_OP_ENABLE	(1)
+#define ECC_OP_DISABLE	(0)
 
 #define ECC_ENCCON		(0x00)
 #define ECC_ENCCNFG		(0x04)
@@ -267,10 +267,10 @@ EXPORT_SYMBOL(mtk_ecc_release);
 static void mtk_ecc_hw_init(struct mtk_ecc *ecc)
 {
 	mtk_ecc_wait_idle(ecc, ECC_ENCODE);
-	writew(ECC_CODEC_DISABLE, ecc->regs + ECC_ENCCON);
+	writew(ECC_OP_DISABLE, ecc->regs + ECC_ENCCON);
 
 	mtk_ecc_wait_idle(ecc, ECC_DECODE);
-	writel(ECC_CODEC_DISABLE, ecc->regs + ECC_DECCON);
+	writel(ECC_OP_DISABLE, ecc->regs + ECC_DECCON);
 }
 
 static struct mtk_ecc *mtk_ecc_get(struct device_node *np)
@@ -318,7 +318,7 @@ int mtk_ecc_enable(struct mtk_ecc *ecc, struct mtk_ecc_config *config)
 
 	mtk_ecc_wait_idle(ecc, op);
 	mtk_ecc_config(ecc, config);
-	writew(ECC_CODEC_ENABLE, ecc->regs + ECC_CTL_REG(op));
+	writew(ECC_OP_ENABLE, ecc->regs + ECC_CTL_REG(op));
 
 	init_completion(&ecc->done);
 	writew(ECC_IRQ_EN, ecc->regs + ECC_IRQ_REG(op));
@@ -332,13 +332,13 @@ void mtk_ecc_disable(struct mtk_ecc *ecc)
 	enum mtk_ecc_operation op = ECC_ENCODE;
 
 	/* find out the running operation */
-	if  (readw(ecc->regs + ECC_CTL_REG(op)) != ECC_CODEC_ENABLE)
+	if  (readw(ecc->regs + ECC_CTL_REG(op)) != ECC_OP_ENABLE)
 	     op = ECC_DECODE;
 
 	/* disable it */
 	mtk_ecc_wait_idle(ecc, op);
 	writew(0, ecc->regs + ECC_IRQ_REG(op));
-	writew(ECC_CODEC_DISABLE, ecc->regs + ECC_CTL_REG(op));
+	writew(ECC_OP_DISABLE, ecc->regs + ECC_CTL_REG(op));
 
 	mutex_unlock(&ecc->lock);
 }
