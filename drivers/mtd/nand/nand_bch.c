@@ -158,17 +158,10 @@ struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
 
 	eccsteps = mtd->writesize/eccsize;
 
-	/* if no ecc placement scheme was provided, build one */
+	/* Check that we have an oob layout description. */
 	if (!mtd->ooblayout) {
-
-		/* handle large page devices only */
-		if (mtd->oobsize < 64) {
-			printk(KERN_WARNING "must provide an oob scheme for "
-			       "oobsize %d\n", mtd->oobsize);
-			goto fail;
-		}
-
-		mtd_set_ooblayout(mtd, &nand_ooblayout_lp_ops);
+		pr_warn("missing oob scheme");
+		goto fail;
 	}
 
 	/* sanity checks */
@@ -177,6 +170,16 @@ struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
 		goto fail;
 	}
 
+	/*
+	 * ecc->steps and ecc->total might be used by mtd->ooblayout->ecc(),
+	 * which is called by mtd_ooblayout_count_eccbytes().
+	 * Make sure they are properly initialized before calling
+	 * mtd_ooblayout_count_eccbytes().
+	 * FIXME: we should probably rework the sequencing in nand_scan_tail()
+	 * to avoid setting those fields twice.
+	 */
+	nand->ecc.steps = eccsteps;
+	nand->ecc.total = eccsteps * eccbytes;
 	if (mtd_ooblayout_count_eccbytes(mtd) != (eccsteps*eccbytes)) {
 		printk(KERN_WARNING "invalid ecc layout\n");
 		goto fail;

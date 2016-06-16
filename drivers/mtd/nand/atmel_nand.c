@@ -36,7 +36,6 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
-#include <linux/of_mtd.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
@@ -66,10 +65,6 @@ module_param(on_flash_bbt, int, 0);
 struct atmel_nand_caps {
 	bool pmecc_correct_erase_page;
 	uint8_t pmecc_max_correction;
-};
-
-struct atmel_nand_nfc_caps {
-	uint32_t rb_mask;
 };
 
 /*
@@ -130,7 +125,6 @@ struct atmel_nfc {
 	/* Point to the sram bank which include readed data via NFC */
 	void			*data_in_sram;
 	bool			will_write_sram;
-	const struct atmel_nand_nfc_caps *caps;
 };
 static struct atmel_nfc	nand_nfc;
 
@@ -446,14 +440,13 @@ err_buf:
 static void atmel_read_buf(struct mtd_info *mtd, u8 *buf, int len)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct atmel_nand_host *host = nand_get_controller_data(chip);
 
 	if (use_dma && len > mtd->oobsize)
 		/* only use DMA for bigger than oob size: better performances */
 		if (atmel_nand_dma_op(mtd, buf, len, 1) == 0)
 			return;
 
-	if (host->board.bus_width_16)
+	if (chip->options & NAND_BUSWIDTH_16)
 		atmel_read_buf16(mtd, buf, len);
 	else
 		atmel_read_buf8(mtd, buf, len);
@@ -462,14 +455,13 @@ static void atmel_read_buf(struct mtd_info *mtd, u8 *buf, int len)
 static void atmel_write_buf(struct mtd_info *mtd, const u8 *buf, int len)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct atmel_nand_host *host = nand_get_controller_data(chip);
 
 	if (use_dma && len > mtd->oobsize)
 		/* only use DMA for bigger than oob size: better performances */
 		if (atmel_nand_dma_op(mtd, (void *)buf, len, 0) == 0)
 			return;
 
-	if (host->board.bus_width_16)
+	if (chip->options & NAND_BUSWIDTH_16)
 		atmel_write_buf16(mtd, buf, len);
 	else
 		atmel_write_buf8(mtd, buf, len);
@@ -993,11 +985,13 @@ static int atmel_nand_pmecc_write_page(struct mtd_info *mtd,
 	for (i = 0; i < chip->ecc.steps; i++) {
 		for (j = 0; j < chip->ecc.bytes; j++) {
 			if (!oobregion.length)
-				mtd_ooblayout_ecc(mtd, section++, &oobregion);
+				mtd_ooblayout_ecc(mtd, section, &oobregion);
 
-			chip->oob_poi[oobregion.offset++] =
+			chip->oob_poi[oobregion.offset] =
 				pmecc_readb_ecc_relaxed(host->ecc, i, j);
 			oobregion.length--;
+			oobregion.offset++;
+			section++;
 		}
 	}
 	chip->write_buf(mtd, chip->oob_poi, mtd->oobsize);
@@ -1213,6 +1207,7 @@ static int atmel_pmecc_nand_init_params(struct platform_device *pdev,
 		dev_warn(host->dev,
 			"Can't get I/O resource regs for PMECC controller, rolling back on software ECC\n");
 		nand_chip->ecc.mode = NAND_ECC_SOFT;
+		nand_chip->ecc.algo = NAND_ECC_HAMMING;
 		return 0;
 	}
 
@@ -1296,6 +1291,7 @@ static int atmel_pmecc_nand_init_params(struct platform_device *pdev,
 		/* page size not handled by HW ECC */
 		/* switching back to soft ECC */
 		nand_chip->ecc.mode = NAND_ECC_SOFT;
+		nand_chip->ecc.algo = NAND_ECC_HAMMING;
 		return 0;
 	}
 
@@ -1509,58 +1505,17 @@ static void atmel_nand_hwctl(struct mtd_info *mtd, int mode)
 		ecc_writel(host->ecc, CR, ATMEL_ECC_RST);
 }
 
-static int atmel_of_init_port(struct atmel_nand_host *host,
-			      struct device_node *np)
+static int atmel_of_init_ecc(struct atmel_nand_host *host,
+			     struct device_node *np)
 {
-	u32 val;
 	u32 offset[2];
-	int ecc_mode;
-	struct atmel_nand_data *board = &host->board;
-	enum of_gpio_flags flags = 0;
-
-	host->caps = (struct atmel_nand_caps *)
-		of_device_get_match_data(host->dev);
-
-	if (of_property_read_u32(np, "atmel,nand-addr-offset", &val) == 0) {
-		if (val >= 32) {
-			dev_err(host->dev, "invalid addr-offset %u\n", val);
-			return -EINVAL;
-		}
-		board->ale = val;
-	}
-
-	if (of_property_read_u32(np, "atmel,nand-cmd-offset", &val) == 0) {
-		if (val >= 32) {
-			dev_err(host->dev, "invalid cmd-offset %u\n", val);
-			return -EINVAL;
-		}
-		board->cle = val;
-	}
-
-	ecc_mode = of_get_nand_ecc_mode(np);
-
-	board->ecc_mode = ecc_mode < 0 ? NAND_ECC_SOFT : ecc_mode;
-
-	board->on_flash_bbt = of_get_nand_on_flash_bbt(np);
-
-	board->has_dma = of_property_read_bool(np, "atmel,nand-has-dma");
-
-	if (of_get_nand_bus_width(np) == 16)
-		board->bus_width_16 = 1;
-
-	board->rdy_pin = of_get_gpio_flags(np, 0, &flags);
-	board->rdy_pin_active_low = (flags == OF_GPIO_ACTIVE_LOW);
-
-	board->enable_pin = of_get_gpio(np, 1);
-	board->det_pin = of_get_gpio(np, 2);
+	u32 val;
 
 	host->has_pmecc = of_property_read_bool(np, "atmel,has-pmecc");
 
-	/* load the nfc driver if there is */
-	of_platform_populate(np, NULL, NULL, host->dev);
-
-	if (!(board->ecc_mode == NAND_ECC_HW) || !host->has_pmecc)
-		return 0;	/* Not using PMECC */
+	/* Not using PMECC */
+	if (!(host->nand_chip.ecc.mode == NAND_ECC_HW) || !host->has_pmecc)
+		return 0;
 
 	/* use PMECC, get correction capability, sector size and lookup
 	 * table offset.
@@ -1601,12 +1556,61 @@ static int atmel_of_init_port(struct atmel_nand_host *host,
 		/* Will build a lookup table and initialize the offset later */
 		return 0;
 	}
+
 	if (!offset[0] && !offset[1]) {
 		dev_err(host->dev, "Invalid PMECC lookup table offset\n");
 		return -EINVAL;
 	}
+
 	host->pmecc_lookup_table_offset_512 = offset[0];
 	host->pmecc_lookup_table_offset_1024 = offset[1];
+
+	return 0;
+}
+
+static int atmel_of_init_port(struct atmel_nand_host *host,
+			      struct device_node *np)
+{
+	u32 val;
+	struct atmel_nand_data *board = &host->board;
+	enum of_gpio_flags flags = 0;
+
+	host->caps = (struct atmel_nand_caps *)
+		of_device_get_match_data(host->dev);
+
+	if (of_property_read_u32(np, "atmel,nand-addr-offset", &val) == 0) {
+		if (val >= 32) {
+			dev_err(host->dev, "invalid addr-offset %u\n", val);
+			return -EINVAL;
+		}
+		board->ale = val;
+	}
+
+	if (of_property_read_u32(np, "atmel,nand-cmd-offset", &val) == 0) {
+		if (val >= 32) {
+			dev_err(host->dev, "invalid cmd-offset %u\n", val);
+			return -EINVAL;
+		}
+		board->cle = val;
+	}
+
+	board->has_dma = of_property_read_bool(np, "atmel,nand-has-dma");
+
+	board->rdy_pin = of_get_gpio_flags(np, 0, &flags);
+	board->rdy_pin_active_low = (flags == OF_GPIO_ACTIVE_LOW);
+
+	board->enable_pin = of_get_gpio(np, 1);
+	board->det_pin = of_get_gpio(np, 2);
+
+	/* load the nfc driver if there is */
+	of_platform_populate(np, NULL, NULL, host->dev);
+
+	/*
+	 * Initialize ECC mode to NAND_ECC_SOFT so that we have a correct value
+	 * even if the nand-ecc-mode property is not defined.
+	 */
+	host->nand_chip.ecc.mode = NAND_ECC_SOFT;
+	host->nand_chip.ecc.algo = NAND_ECC_HAMMING;
 
 	return 0;
 }
@@ -1623,6 +1627,7 @@ static int atmel_hw_nand_init_params(struct platform_device *pdev,
 		dev_err(host->dev,
 			"Can't get I/O resource regs, use software ECC\n");
 		nand_chip->ecc.mode = NAND_ECC_SOFT;
+		nand_chip->ecc.algo = NAND_ECC_HAMMING;
 		return 0;
 	}
 
@@ -1655,6 +1660,7 @@ static int atmel_hw_nand_init_params(struct platform_device *pdev,
 		/* page size not handled by HW ECC */
 		/* switching back to soft ECC */
 		nand_chip->ecc.mode = NAND_ECC_SOFT;
+		nand_chip->ecc.algo = NAND_ECC_HAMMING;
 		return 0;
 	}
 
@@ -1704,9 +1710,9 @@ static irqreturn_t hsmc_interrupt(int irq, void *dev_id)
 		nfc_writel(host->nfc->hsmc_regs, IDR, NFC_SR_XFR_DONE);
 		ret = IRQ_HANDLED;
 	}
-	if (pending & host->nfc->caps->rb_mask) {
+	if (pending & NFC_SR_RB_EDGE) {
 		complete(&host->nfc->comp_ready);
-		nfc_writel(host->nfc->hsmc_regs, IDR, host->nfc->caps->rb_mask);
+		nfc_writel(host->nfc->hsmc_regs, IDR, NFC_SR_RB_EDGE);
 		ret = IRQ_HANDLED;
 	}
 	if (pending & NFC_SR_CMD_DONE) {
@@ -1724,7 +1730,7 @@ static void nfc_prepare_interrupt(struct atmel_nand_host *host, u32 flag)
 	if (flag & NFC_SR_XFR_DONE)
 		init_completion(&host->nfc->comp_xfer_done);
 
-	if (flag & host->nfc->caps->rb_mask)
+	if (flag & NFC_SR_RB_EDGE)
 		init_completion(&host->nfc->comp_ready);
 
 	if (flag & NFC_SR_CMD_DONE)
@@ -1742,7 +1748,7 @@ static int nfc_wait_interrupt(struct atmel_nand_host *host, u32 flag)
 	if (flag & NFC_SR_XFR_DONE)
 		comp[index++] = &host->nfc->comp_xfer_done;
 
-	if (flag & host->nfc->caps->rb_mask)
+	if (flag & NFC_SR_RB_EDGE)
 		comp[index++] = &host->nfc->comp_ready;
 
 	if (flag & NFC_SR_CMD_DONE)
@@ -1810,7 +1816,7 @@ static int nfc_device_ready(struct mtd_info *mtd)
 		dev_err(host->dev, "Lost the interrupt flags: 0x%08x\n",
 				mask & status);
 
-	return status & host->nfc->caps->rb_mask;
+	return status & NFC_SR_RB_EDGE;
 }
 
 static void nfc_select_chip(struct mtd_info *mtd, int chip)
@@ -1983,8 +1989,8 @@ static void nfc_nand_command(struct mtd_info *mtd, unsigned int command,
 		}
 		/* fall through */
 	default:
-		nfc_prepare_interrupt(host, host->nfc->caps->rb_mask);
-		nfc_wait_interrupt(host, host->nfc->caps->rb_mask);
+		nfc_prepare_interrupt(host, NFC_SR_RB_EDGE);
+		nfc_wait_interrupt(host, NFC_SR_RB_EDGE);
 	}
 }
 
@@ -2152,6 +2158,19 @@ static int atmel_nand_probe(struct platform_device *pdev)
 	} else {
 		memcpy(&host->board, dev_get_platdata(&pdev->dev),
 		       sizeof(struct atmel_nand_data));
+		nand_chip->ecc.mode = host->board.ecc_mode;
+
+		/*
+		 * When using software ECC every supported avr32 board means
+		 * Hamming algorithm. If that ever changes we'll need to add
+		 * ecc_algo field to the struct atmel_nand_data.
+		 */
+		if (nand_chip->ecc.mode == NAND_ECC_SOFT)
+			nand_chip->ecc.algo = NAND_ECC_HAMMING;
+
+		/* 16-bit bus width */
+		if (host->board.bus_width_16)
+			nand_chip->options |= NAND_BUSWIDTH_16;
 	}
 
 	 /* link the private data structures */
@@ -2193,11 +2212,8 @@ static int atmel_nand_probe(struct platform_device *pdev)
 		nand_chip->cmd_ctrl = atmel_nand_cmd_ctrl;
 	}
 
-	nand_chip->ecc.mode = host->board.ecc_mode;
 	nand_chip->chip_delay = 40;		/* 40us command delay time */
 
-	if (host->board.bus_width_16)	/* 16-bit bus width */
-		nand_chip->options |= NAND_BUSWIDTH_16;
 
 	nand_chip->read_buf = atmel_read_buf;
 	nand_chip->write_buf = atmel_write_buf;
@@ -2230,11 +2246,6 @@ static int atmel_nand_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (host->board.on_flash_bbt || on_flash_bbt) {
-		dev_info(&pdev->dev, "Use On Flash BBT\n");
-		nand_chip->bbt_options |= NAND_BBT_USE_FLASH;
-	}
-
 	if (!host->board.has_dma)
 		use_dma = 0;
 
@@ -2259,6 +2270,18 @@ static int atmel_nand_probe(struct platform_device *pdev)
 	if (nand_scan_ident(mtd, 1, NULL)) {
 		res = -ENXIO;
 		goto err_scan_ident;
+	}
+
+	if (host->board.on_flash_bbt || on_flash_bbt)
+		nand_chip->bbt_options |= NAND_BBT_USE_FLASH;
+
+	if (nand_chip->bbt_options & NAND_BBT_USE_FLASH)
+		dev_info(&pdev->dev, "Use On Flash BBT\n");
+
+	if (IS_ENABLED(CONFIG_OF) && pdev->dev.of_node) {
+		res = atmel_of_init_ecc(host, pdev->dev.of_node);
+		if (res)
+			goto err_hw_ecc;
 	}
 
 	if (nand_chip->ecc.mode == NAND_ECC_HW) {
@@ -2398,11 +2421,6 @@ static int atmel_nand_nfc_probe(struct platform_device *pdev)
 		}
 	}
 
-	nfc->caps = (const struct atmel_nand_nfc_caps *)
-		of_device_get_match_data(&pdev->dev);
-	if (!nfc->caps)
-		return -ENODEV;
-
 	nfc_writel(nfc->hsmc_regs, IDR, 0xffffffff);
 	nfc_readl(nfc->hsmc_regs, SR);	/* clear the NFC_SR */
 
@@ -2431,17 +2449,8 @@ static int atmel_nand_nfc_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct atmel_nand_nfc_caps sama5d3_nfc_caps = {
-	.rb_mask = NFC_SR_RB_EDGE0,
-};
-
-static const struct atmel_nand_nfc_caps sama5d4_nfc_caps = {
-	.rb_mask = NFC_SR_RB_EDGE3,
-};
-
 static const struct of_device_id atmel_nand_nfc_match[] = {
-	{ .compatible = "atmel,sama5d3-nfc", .data = &sama5d3_nfc_caps },
-	{ .compatible = "atmel,sama5d4-nfc", .data = &sama5d4_nfc_caps },
+	{ .compatible = "atmel,sama5d3-nfc" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, atmel_nand_nfc_match);

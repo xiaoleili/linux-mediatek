@@ -21,7 +21,6 @@
 #include <linux/mtd/partitions.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_mtd.h>
 #include <linux/delay.h>
 
 /* NANDc reg offsets */
@@ -1712,7 +1711,7 @@ static void qcom_nandc_select_chip(struct mtd_info *mtd, int chipnr)
  * the sum of the three).
  */
 static int qcom_nand_ooblayout_ecc(struct mtd_info *mtd, int section,
-                                   struct mtd_oob_region *oobregion)
+				   struct mtd_oob_region *oobregion)
 {
 	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct qcom_nand_host *host = to_qcom_nand_host(chip);

@@ -958,9 +958,11 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 			nand->ecc.strength = 1;
 			break;
 
-		case NAND_ECC_SOFT_BCH:
-			dev_info(&pdev->dev, "Using 4-bit SW BCH ECC scheme\n");
-			break;
+		case NAND_ECC_SOFT:
+			if (nand->ecc.algo == NAND_ECC_BCH) {
+				dev_info(&pdev->dev, "Using 4-bit SW BCH ECC scheme\n");
+				break;
+			}
 
 		default:
 			dev_err(&pdev->dev, "Unsupported ECC mode!\n");
@@ -971,7 +973,7 @@ static int __init fsmc_nand_probe(struct platform_device *pdev)
 		 * Don't set layout for BCH4 SW ECC. This will be
 		 * generated later in nand_bch_init() later.
 		 */
-		if (nand->ecc.mode != NAND_ECC_SOFT_BCH) {
+		if (nand->ecc.mode == NAND_ECC_HW) {
 			switch (mtd->oobsize) {
 			case 16:
 			case 64:
